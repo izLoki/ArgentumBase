@@ -28,6 +28,10 @@ pnpm-debug.log*
 .npm
 .eslintcache
 *.tsbuildinfo
+__pycache__/
+
+# Scratch from browser-driven checks of the client
+.playwright-cli/
 
 # Editors
 .vscode/*
@@ -40,3 +44,4 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+/.playwright-cli

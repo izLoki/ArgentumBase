@@ -14,11 +14,13 @@
  *   cls, slot          which class shows it, and in which rail slot (0..5)
  *   cooldownMs         before cooldown reduction, which is GLOBAL — there is
  *                      no per-spell cooldown scaling
- *   targeting          'melee'|'self'|'tile'|'ray'|'aoe'|'projectile'|'dash'
+ *   targeting          'melee'|'nearest'|'self'|'tile'|'ray'|'aoe'|
+ *                      'projectile'|'dash'
  *   range, radius      BLOCKS (Chebyshev) — see the note on units below
  *   speedTps           blocks per second, projectiles only
  *   pierce             keep going after the first target
  *   phasing            dash passes through entities
+ *   sweeps             dash damages everything it travelled through
  *   width              ray width in blocks, for cones
  *   requiresLos        Bresenham line of sight over ctx.isWalkable
  *   fx                 client-side look; the server never reads it
@@ -153,25 +155,34 @@ export const SPELLS = {
   },
 
   /* ---------- warrior ---------- */
-  cleave: {
-    id: 'cleave',
-    name: 'Cleave',
-    icon: '🪓',
+  /**
+   * The warrior's own strike, on slot 1.
+   *
+   * `nearest` because a melee class pressing its bread-and-butter key must
+   * connect: facing is an 8 px decision the stick is making constantly, and
+   * losing a swing to it reads as the game being broken, not as a miss. It
+   * costs a longer cooldown than `attack` for a bigger, aim-free hit.
+   */
+  bash: {
+    id: 'bash',
+    name: 'Bash',
+    icon: '🗡',
     cls: 'warrior',
     slot: 1,
-    cooldownMs: 1800,
-    targeting: 'ray',
-    range: 1,
+    cooldownMs: 1100,
+    targeting: 'nearest',
+    range: 2, // one block of reach beyond the plain attack
     radius: 0,
-    width: 3, // a cone: the block ahead plus its two neighbours
-    pierce: true,
-    stopsOnTerrain: false,
-    fx: { color: 0xffd27f, shape: 'arc', trail: false, impact: 'slash' },
+    fx: { color: 0xffd27f, shape: 'slash', trail: false, impact: 'slash' },
     actions: [
-      { type: 'damage', base: 26, attr: 'str', scaling: 1.1, school: 'physical', target: 'hit' },
+      { type: 'damage', base: 18, attr: 'str', scaling: 1.1, school: 'physical', target: 'hit' },
     ],
   },
 
+  /**
+   * A run with the sword out: it phases through bodies and `sweeps` cuts down
+   * everything it passed, rather than stopping dead on the first one.
+   */
   charge: {
     id: 'charge',
     name: 'Charge',
@@ -182,11 +193,29 @@ export const SPELLS = {
     targeting: 'dash',
     range: 4,
     radius: 0,
-    phasing: false,
+    phasing: true,
+    sweeps: true,
     fx: { color: 0xffb35c, shape: 'streak', trail: true, impact: 'slam' },
     actions: [
       { type: 'damage', base: 22, attr: 'str', scaling: 0.9, school: 'physical', target: 'hit' },
-      { type: 'effect', effect: 'stunned', ms: 800, target: 'hit' },
+      // Shorter than a single-target slam would be: a good charge stuns a line.
+      { type: 'effect', effect: 'stunned', ms: 600, target: 'hit' },
+    ],
+  },
+
+  whirlwind: {
+    id: 'whirlwind',
+    name: 'Whirlwind',
+    icon: '🌪',
+    cls: 'warrior',
+    slot: 3,
+    cooldownMs: 4500,
+    targeting: 'aoe',
+    range: 0,
+    radius: 1,
+    fx: { color: 0xffe0a3, shape: 'ring', trail: false, impact: 'ring' },
+    actions: [
+      { type: 'damage', base: 24, attr: 'str', scaling: 1, school: 'physical', target: 'area' },
     ],
   },
 
@@ -195,7 +224,7 @@ export const SPELLS = {
     name: 'War Cry',
     icon: '📣',
     cls: 'warrior',
-    slot: 3,
+    slot: 4,
     cooldownMs: 12000,
     targeting: 'self',
     range: 0,
@@ -211,7 +240,7 @@ export const SPELLS = {
     name: 'Shield Wall',
     icon: '🛡',
     cls: 'warrior',
-    slot: 4,
+    slot: 5,
     cooldownMs: 16000,
     targeting: 'self',
     range: 0,
@@ -219,22 +248,6 @@ export const SPELLS = {
     fx: { color: 0x9fb6d4, shape: 'shell', trail: false, impact: 'none' },
     // One effect carrying a buff and a debuff at once.
     actions: [{ type: 'effect', effect: 'shielded', ms: 4000, target: 'self' }],
-  },
-
-  whirlwind: {
-    id: 'whirlwind',
-    name: 'Whirlwind',
-    icon: '🌪',
-    cls: 'warrior',
-    slot: 5,
-    cooldownMs: 4000,
-    targeting: 'aoe',
-    range: 0,
-    radius: 1,
-    fx: { color: 0xffe0a3, shape: 'ring', trail: false, impact: 'ring' },
-    actions: [
-      { type: 'damage', base: 24, attr: 'str', scaling: 1, school: 'physical', target: 'area' },
-    ],
   },
 
   /* ---------- hunter ---------- */
@@ -335,12 +348,167 @@ export const SPELLS = {
       },
     ],
   },
+
+  /* ---------- monsters (ARENA.md §5.1) ----------
+   *
+   * Ordinary rows with `cls: 'npc'`, which is the whole point of mobs casting
+   * through the same executor: a dragon's fire breath is resolved by the very
+   * code that resolves Lightning Ray. Nothing here needs a new `targeting`
+   * shape or a new action.
+   *
+   * A mob never has a rail, so `slot` is meaningless and stays 0. Ability
+   * CHOICE is a data question: `MOB_TYPES[type].spells` is in priority order
+   * and the mob casts the first entry that is off cooldown and whose range
+   * covers its target. Retuning a monster means reordering that list.
+   */
+
+  /** Dragon filler. Short cooldown, `str`-scaling: what is left over. */
+  clawSwipe: {
+    id: 'clawSwipe',
+    name: 'Claw Swipe',
+    icon: '🐾',
+    cls: 'npc',
+    slot: 0,
+    cooldownMs: 1400,
+    targeting: 'melee',
+    range: 1,
+    radius: 0,
+    fx: { color: 0xffb27f, shape: 'slash', trail: false, impact: 'slash' },
+    actions: [
+      { type: 'damage', base: 16, attr: 'str', scaling: 1, school: 'physical', target: 'hit' },
+    ],
+  },
+
+  /** Occasional. Hits everything around it and knocks it back — the one user
+   *  of the `knockback` action. */
+  tailSweep: {
+    id: 'tailSweep',
+    name: 'Tail Sweep',
+    icon: '🦎',
+    cls: 'npc',
+    slot: 0,
+    cooldownMs: 6500,
+    targeting: 'aoe',
+    range: 0,
+    radius: 1,
+    fx: { color: 0xd9a05c, shape: 'ring', trail: false, impact: 'ring' },
+    actions: [
+      { type: 'damage', base: 20, attr: 'str', scaling: 0.9, school: 'physical', target: 'area' },
+      { type: 'knockback', blocks: 1, target: 'area' },
+    ],
+  },
+
+  /** The real threat. Long cooldown, `int`-scaling, burns the whole cone. */
+  fireBreath: {
+    id: 'fireBreath',
+    name: 'Fire Breath',
+    icon: '🔥',
+    cls: 'npc',
+    slot: 0,
+    cooldownMs: 9500,
+    targeting: 'ray',
+    range: 4,
+    radius: 0,
+    width: 3,
+    pierce: true,
+    stopsOnTerrain: true,
+    fx: { color: 0xff5a2c, shape: 'beam', trail: true, impact: 'burst' },
+    actions: [
+      { type: 'damage', base: 30, attr: 'int', scaling: 1.1, school: 'fire', target: 'hit' },
+      { type: 'effect', effect: 'burning', ms: 4000, params: { tick: { hp: -8 } }, target: 'hit' },
+    ],
+  },
+
+  /** Golem melee: slow and very heavy. */
+  stoneFist: {
+    id: 'stoneFist',
+    name: 'Stone Fist',
+    icon: '👊',
+    cls: 'npc',
+    slot: 0,
+    cooldownMs: 2600,
+    targeting: 'melee',
+    range: 1,
+    radius: 0,
+    fx: { color: 0xb0a894, shape: 'slash', trail: false, impact: 'slam' },
+    actions: [
+      { type: 'damage', base: 28, attr: 'str', scaling: 1, school: 'physical', target: 'hit' },
+    ],
+  },
+
+  /** A lobbed rock, telegraphed by how slowly it travels. */
+  boulder: {
+    id: 'boulder',
+    name: 'Boulder',
+    icon: '🪨',
+    cls: 'npc',
+    slot: 0,
+    cooldownMs: 7000,
+    targeting: 'projectile',
+    range: 6,
+    radius: 1,
+    speedTps: 5,
+    pierce: false,
+    stopsOnTerrain: true,
+    requiresLos: true,
+    fx: { color: 0x8d8375, shape: 'orb', trail: false, impact: 'slam' },
+    actions: [
+      { type: 'damage', base: 24, attr: 'str', scaling: 0.9, school: 'physical', target: 'area' },
+    ],
+  },
+
+  /**
+   * The skeleton's only ability, and it is an OBSTACLE, not a threat.
+   *
+   * `base: 2, scaling: 0` ignores the caster's attributes entirely, so it deals
+   * the same trivial damage forever and cannot scale into relevance. The point
+   * is the root: it interrupts a chase, not a life bar. It is deliberately not
+   * zero — `spellDamage` floors at 1, and a skeleton finishing off someone who
+   * was already nearly dead is a good story rather than a bug.
+   */
+  chill: {
+    id: 'chill',
+    name: 'Chill',
+    icon: '🥶',
+    cls: 'npc',
+    slot: 0,
+    cooldownMs: 4500,
+    targeting: 'tile',
+    range: 4,
+    radius: 0,
+    requiresLos: true,
+    fx: { color: 0xbfe9ff, shape: 'flash', trail: false, impact: 'ring' },
+    actions: [
+      { type: 'damage', base: 2, attr: 'int', scaling: 0, school: 'frost', target: 'hit' },
+      { type: 'effect', effect: 'rooted', ms: 1200, target: 'hit' },
+    ],
+  },
+
+  /**
+   * The bat's only ability. Its damage is ENTIRELY in the DoT, which is why
+   * there is no `damage` action here: it bites, poisons and leaves.
+   */
+  venomBite: {
+    id: 'venomBite',
+    name: 'Venom Bite',
+    icon: '🧪',
+    cls: 'npc',
+    slot: 0,
+    cooldownMs: 5000,
+    targeting: 'melee',
+    range: 1,
+    radius: 0,
+    fx: { color: 0x9ad96b, shape: 'slash', trail: false, impact: 'spark' },
+    actions: [
+      { type: 'effect', effect: 'poisoned', ms: 6000, params: { tick: { hp: -3 } }, target: 'hit' },
+    ],
+  },
 }
 
 /** The five class spells, in slot order. The attack is slot 0 for everyone. */
 export const CLASS_SPELLS = {
   mage: ['fireball', 'lightningRay', 'blink', 'frostNova', 'iceBlock'],
-  warrior: ['cleave', 'charge', 'warCry', 'shieldWall', 'whirlwind'],
+  warrior: ['bash', 'charge', 'whirlwind', 'warCry', 'shieldWall'],
   hunter: ['piercingShot', 'trap', 'huntersMark', 'roll', 'volley'],
 }
 
@@ -348,7 +516,16 @@ export const CLASS_SPELLS = {
 export const UNLOCK_LEVELS = [1, 1, 1, 8, 14]
 
 /** Every targeting shape the executor must handle. Keeps the registry honest. */
-export const TARGETING = ['melee', 'self', 'tile', 'ray', 'aoe', 'projectile', 'dash']
+export const TARGETING = [
+  'melee',
+  'nearest',
+  'self',
+  'tile',
+  'ray',
+  'aoe',
+  'projectile',
+  'dash',
+]
 
 /**
  * Stable id order, so the snapshot can send a small integer instead of a

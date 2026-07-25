@@ -157,13 +157,20 @@ overlay (`I`) on a phone. Never touch its elements; push into it:
 
 ```js
 ctx.hud.setStats({ kills, deaths })      // any subset: hp, maxHp, exp, expToNext, level, gold
+ctx.hud.setCharacter({ attributes, stats }) // Character tab: attrs + TOTAL derived stats
 ctx.hud.setGear({ weapon: 2, boots: 1 }) // owned tier per gear slot
+ctx.hud.setGearMarket({ nextCosts, buy }) // upgrade prices + the buy callback
+ctx.hud.openEquipment()                  // open the sidebar on the Equipment tab
 ```
 
-Its two sections are stacked, never tabbed: **Equipment**, the four gear slots
-with their tier, and **Spells**, the class's six rail slots with their key and
-unlock level, both read from `shared/gear.js` and `shared/spells.js`. The HUD
-draws them; whoever owns the behaviour pushes state in through the calls above.
+Its body is two tabs. **Character** is the sheet: the four attributes and the
+total derived stats, pushed by `profile`. **Equipment** is the four gear slots
+as full-width rows — current bonuses, what the next tier adds, and an Upgrade
+button — drawn from `shared/gear.js` and fed by `inventory`, which owns the
+prices and the `buy` wire (there is no separate shop modal). The HUD draws;
+whoever owns the behaviour pushes state in through the calls above. Spells are
+not here — the class's rail lives in the on-screen hotbar, next to the keys
+that cast it.
 
 `--hud-right` is the width the sidebar takes from the world. `#game` is inset
 by it, so the camera already centres the player in what is visible — but a
@@ -378,6 +385,70 @@ Three things about reading and fitting a raw sheet:
   the pose standing at the right height, but the pixels it lost are gone — the fix
   is to re-export the sheet taller. The hunter's UP row is currently in this state,
   missing the boots.
+
+### Monsters
+
+Same atlas format as a class walk sheet, one registry along:
+
+```sh
+python tools/cut-sprite-atlas.py dragon.png client/src/render/sprites/mob-dragon.png --rows 0 1 2 3
+```
+
+```js
+const MOB_SHEETS = { dragon: mobDragonUrl }   // sprites.js
+```
+
+`systems/npc.js` draws the sprite at `look.scale` when `mobSheetFor(type)` finds
+one, and keeps its coloured blob and emoji when it does not — so the roster gets
+its art one creature at a time. The walk cycle is distance-driven like a
+player's: mobs step on their own `moveMs`, and a timer would be in phase with
+the feet at exactly one speed.
+
+### Ability animations
+
+A spell can replace the walking body with an animation of its own for the length
+of one cast. Same idea, one extra registry:
+
+```sh
+# one row of frames: a spin looks the same from every direction
+python tools/cut-sprite-atlas.py warrior_attack_360.png \
+    client/src/render/sprites/warrior-whirlwind.png --action --source-grid 3x2
+
+# four rows: a lunge has to point where the caster is going. `--key-background`
+# is for a sheet matted onto a colour plate instead of cut out.
+python tools/cut-sprite-atlas.py warrior_dash.png \
+    client/src/render/sprites/warrior-charge.png --action --rows 0 1 2 3 --key-background
+```
+
+```js
+const ACTIONS = {                                  // sprites.js
+  'warrior:whirlwind': warriorWhirlwindUrl,
+  'warrior:charge': warriorChargeUrl,
+}
+```
+
+Row and frame counts are read off the image, not declared: **one** row means the
+animation ignores facing, **four** means it is picked by the caster's direction —
+once, at cast time, so a dash cannot turn mid-lunge.
+
+`systems/spells.js` calls `playAction(casterId, spellId)` on `SPELL_CAST_FX`, and
+skips its own generic flash when that returns true — a finished animation does
+not want a placeholder ring drawn over it. A spell with no entry is unaffected.
+
+An action cell is **352 x 192**: wider than a walk cell, and the same height. A
+sword sweep reaches about a body's width to each side but never above the head or
+below the feet, so keeping `CELL_H` and `FEET_Y` means the body lands on the same
+baseline at the same scale and the swap is invisible. Two traps the tool handles
+for you, both of which show up as garbage on screen rather than as an error:
+
+- **The anchor must ignore the effect.** A sweep of light is half the image and
+  moves every frame; anchor on it and the character jitters inside his own
+  animation. `--action` masks saturated gold out before measuring. It is only
+  applied in that mode — on a walk sheet the same test would eat the hunter's
+  blond hair.
+- **Each frame is cut in isolation.** The sampling window is sized for the art,
+  not for the source grid, so a wide pose reaches past its own cell and drags the
+  neighbouring frame's sweep in as a crescent floating beside the character.
 
 ## Movement is predicted
 

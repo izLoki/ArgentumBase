@@ -45,6 +45,9 @@ export const TILE = {
   ROCK: 4,
   FLOOR: 5,
   WALL: 6,
+  SAND: 7,
+  BRIDGE: 8,
+  HOUSE: 9,
 }
 
 export const TILE_META = {
@@ -55,6 +58,9 @@ export const TILE_META = {
   [TILE.ROCK]: { name: 'rock', color: 0x555555, blocked: true },
   [TILE.FLOOR]: { name: 'floor', color: 0x8a7a5c, blocked: false },
   [TILE.WALL]: { name: 'wall', color: 0x3a3128, blocked: true },
+  [TILE.SAND]: { name: 'sand', color: 0xc7ad6f, blocked: false },
+  [TILE.BRIDGE]: { name: 'bridge', color: 0x8a6238, blocked: false },
+  [TILE.HOUSE]: { name: 'house', color: 0x7a4a30, blocked: true },
 }
 
 export const DIR = {

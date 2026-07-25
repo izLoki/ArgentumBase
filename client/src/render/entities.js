@@ -21,7 +21,7 @@ import { Container, Graphics, Sprite, Text } from 'pixi.js'
 import { TILE_SIZE, BLOCK_PX, CLASSES, DIR_VEC, PLAYER_RADIUS } from '@shared/constants.js'
 import { state } from '../state.js'
 import { movement } from '../movement.js'
-import { sheetFor, CELL_W, CELL_H, FEET_Y } from './sprites.js'
+import { sheetFor, actionFor, CELL_W, CELL_H, FEET_Y, ACTION_CELL_W } from './sprites.js'
 
 /**
  * Smoothing per 60 Hz frame (0 = frozen, 1 = teleport). The local player is
@@ -55,6 +55,14 @@ const WALK_CYCLE = [0, 1, 2, 1]
 const IDLE_AFTER_MS = 120
 /** Below this a frame's movement is interpolation settling, not a step. */
 const MOVING_EPSILON = 0.05
+
+/**
+ * Caster animations (see `playAction`). The cell is wider than a walk cell and
+ * exactly as tall, so the same anchor puts the body in the same place.
+ */
+const ACTION_W = (SPRITE_H * ACTION_CELL_W) / CELL_H
+/** Per frame. Six frames of a sword spin want to be over in under half a second. */
+const ACTION_FRAME_MS = 70
 
 /** @type {Map<string, Container>} playerId -> view */
 const views = new Map()
@@ -107,8 +115,51 @@ function makeView(player) {
   view.addChild(label)
 
   view.__bar = bar
+  view.__cls = player.cls
   view.__walk = { dist: 0, stillMs: 0 }
+  // Kept current by `syncEntities`, so `playAction` can pick a facing without
+  // the caller having to thread one through from the network payload.
+  view.__dir = player.dir ?? 0
   return view
+}
+
+/**
+ * Plays a class's own animation for a cast, once, on top of the walk sprite.
+ *
+ * Called by `systems/spells.js` when the server announces a cast. The caller
+ * uses the return value to decide whether to also draw the generic spell FX:
+ * a class that has its art does not need a placeholder ring on top of it.
+ *
+ * @returns {boolean} whether an animation actually started
+ */
+export function playAction(playerId, spellId) {
+  const view = views.get(playerId)
+  if (!view?.__sprite) return false // fallback body: nothing to animate
+
+  const rows = actionFor(view.__cls, spellId)
+  if (!rows?.length) return false
+
+  // A single row is direction-agnostic — a spin looks the same from anywhere.
+  // Four rows are a walk sheet's layout, so the facing picks one, ONCE: a dash
+  // that changed row halfway through would turn the caster mid-lunge.
+  const frames = rows.length > 1 ? (rows[view.__dir] ?? rows[0]) : rows[0]
+  if (!frames?.length) return false
+
+  if (!view.__actionSprite) {
+    const sprite = new Sprite(frames[0])
+    sprite.anchor.set(0.5, FEET_Y / CELL_H)
+    sprite.setSize(ACTION_W, SPRITE_H)
+    sprite.y = BODY_H / 2
+    // Under the bar and the nameplate, which were added before it.
+    view.addChildAt(sprite, 1)
+    view.__actionSprite = sprite
+  }
+
+  view.__action = { frames, elapsedMs: 0 }
+  view.__actionSprite.texture = frames[0]
+  view.__actionSprite.visible = true
+  view.__sprite.visible = false
+  return true
 }
 
 function drawHpBar(bar, hp, maxHp, headY) {
@@ -146,6 +197,21 @@ function animate(view, movedPx, dir, dtMs) {
   const step = walk.stillMs >= IDLE_AFTER_MS ? 0 : Math.floor(walk.dist / STRIDE_PX)
   const row = view.__textures[dir] ?? view.__textures[0]
   view.__sprite.texture = row[WALK_CYCLE[step % WALK_CYCLE.length]]
+}
+
+/** Runs a cast animation to its last frame, then hands the body back. */
+function advanceAction(view, dtMs) {
+  const action = view.__action
+  action.elapsedMs += dtMs
+
+  const frame = Math.floor(action.elapsedMs / ACTION_FRAME_MS)
+  if (frame >= action.frames.length) {
+    view.__action = null
+    view.__actionSprite.visible = false
+    view.__sprite.visible = true
+    return
+  }
+  view.__actionSprite.texture = action.frames[frame]
 }
 
 /**
@@ -189,7 +255,11 @@ export function syncEntities(layer, dtMs = 16.67) {
     drawHpBar(view.__bar, player.hp, player.maxHp, view.__headY)
 
     if (view.__sprite) {
+      // The walk cycle keeps running under a cast, so the legs are in step
+      // again the moment the animation hands the body back.
+      view.__dir = from.dir
       animate(view, Math.hypot(view.x - wasX, view.y - wasY), from.dir, dtMs)
+      if (view.__action) advanceAction(view, dtMs)
     } else {
       drawFacing(view.__facing, from.dir)
     }

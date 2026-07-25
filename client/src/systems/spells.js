@@ -25,12 +25,17 @@ import { Container, Graphics } from 'pixi.js'
 import { S2C, C2S } from '@shared/protocol.js'
 import { TILE_SIZE, blocksToTiles } from '@shared/constants.js'
 import { spellDef, spellFromIndex } from '@shared/spells.js'
+import { playAction } from '../render/entities.js'
+import { allMobStates } from './npc.js'
 
 /** Hold this long on a spell button to enter manual aim. */
 export const AIM_HOLD_MS = 250
 
-/** Shapes that read the caster's facing and never need a coordinate. */
-const AIMLESS = new Set(['self', 'ray', 'dash', 'melee'])
+/**
+ * Shapes the client never aims: they read the caster's facing, or — for
+ * `nearest` — the server picks the target itself.
+ */
+const AIMLESS = new Set(['self', 'ray', 'dash', 'melee', 'nearest'])
 
 /** How long a beam, a flash or an impact ring stays on screen. */
 const RAY_MS = 220
@@ -119,7 +124,12 @@ export default {
       if (payload.projId != null && !projViews.has(payload.projId)) {
         addProjectile(payload.projId, def, payload.x0, payload.y0)
       }
-      if (def.targeting !== 'projectile') flash(def, payload.x0, payload.y0)
+
+      // A class that has its own art for this cast animates the caster instead.
+      // The generic flash is the placeholder for the ones that do not — drawing
+      // both would put a plain ring on top of a finished animation.
+      const animated = payload.casterKind === 'player' && playAction(payload.casterId, def.id)
+      if (def.targeting !== 'projectile' && !animated) flash(def, payload.x0, payload.y0)
     },
 
     [S2C.SPELL_RAY](ctx, payload) {
@@ -255,6 +265,16 @@ function autoTarget(ctx, def) {
     const dist = Math.max(Math.abs(player.x - me.x), Math.abs(player.y - me.y))
     if (dist > reach || dist >= bestDist) continue
     best = { x: player.x, y: player.y }
+    bestDist = dist
+  }
+
+  // Monsters are enemies too, and on a phone they are most of what there is to
+  // aim at: leaving them out would make every mob a long-press.
+  for (const mob of allMobStates()) {
+    if (mob.hp <= 0) continue
+    const dist = Math.max(Math.abs(mob.x - me.x), Math.abs(mob.y - me.y))
+    if (dist > reach || dist >= bestDist) continue
+    best = { x: mob.x, y: mob.y }
     bestDist = dist
   }
   return best
@@ -578,10 +598,11 @@ function injectStyles() {
       position: relative;
       width: 44px;
       height: 44px;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 8px;
-      background: rgba(16, 19, 26, 0.82);
-      color: #fff;
+      border: 1px solid #060402;
+      border-radius: 2px;
+      box-shadow: inset 0 0 0 1px #6b5426, inset 0 2px 6px rgba(0, 0, 0, 0.55);
+      background: linear-gradient(rgba(42, 31, 17, 0.92), rgba(19, 13, 7, 0.92));
+      color: var(--text);
       font-size: 18px;
       line-height: 1;
       cursor: pointer;

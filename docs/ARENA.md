@@ -467,7 +467,7 @@ export const SPELLS = {
     cls: 'mage', slot: 1,
     cooldownMs: 2400,         // reduced globally by cdr — no per-spell cooldown scaling
 
-    targeting: 'projectile',  // 'melee'|'self'|'tile'|'ray'|'aoe'|'projectile'|'dash'
+    targeting: 'projectile',  // 'melee'|'nearest'|'self'|'tile'|'ray'|'aoe'|'projectile'|'dash'
     range: 8, radius: 1,      // BLOCKS — blocksToTiles() before touching coords
     speedTps: 9,              // blocks per second, projectiles only
     pierce: false, stopsOnTerrain: true, requiresLos: true,
@@ -483,7 +483,7 @@ export const SPELLS = {
 
 export const CLASS_SPELLS = {
   mage:    ['fireball', 'lightningRay', 'blink', 'frostNova', 'iceBlock'],
-  warrior: ['cleave', 'charge', 'warCry', 'shieldWall', 'whirlwind'],
+  warrior: ['bash', 'charge', 'whirlwind', 'warCry', 'shieldWall'],
   hunter:  ['piercingShot', 'trap', 'huntersMark', 'roll', 'volley'],
 }
 export const UNLOCK_LEVELS = [1, 1, 1, 8, 14]   // by slot index, out of LEVEL_MAX 20
@@ -597,11 +597,11 @@ Utility spells use `scaling: 0`.
 
 | # | Spell | Shape | Notes |
 |---|---|---|---|
-| 1 | **Cleave** | ray range 1, width 3 | a cone, instant, scales with `str` |
-| 2 | **Charge** | dash up to 4 tiles | stops at the first enemy, damage + `stunned 0.8s` |
-| 3 | **War Cry** | self buff | +damage / +defense for 6s |
-| 4 | **Shield Wall** (L8) | self | `taken -60%` for 4s with `slowed` attached — one effect carrying a buff *and* a debuff |
-| 5 | **Whirlwind** (L14) | aoe radius 1 on self | hits everything, short cooldown. *Alternative:* **Execute**, heavy damage below 30% target HP |
+| 1 | **Bash** | `nearest`, range 2 | the class's own strike: hits the closest enemy in reach with no aiming, harder than the universal Attack |
+| 2 | **Charge** | dash 4 blocks, `phasing` + `sweeps` | runs through the line, damaging and stunning everyone it crossed |
+| 3 | **Whirlwind** | aoe radius 1 on self | a 360° swing, hits everything around, short cooldown |
+| 4 | **War Cry** (L8) | self buff | +damage / +defense for 6s |
+| 5 | **Shield Wall** (L14) | self | `taken -60%` for 4s with `slowed` attached — one effect carrying a buff *and* a debuff |
 
 **Hunter** — proposal.
 

@@ -63,7 +63,21 @@ export const EFFECTS = {
     everyMs: 500,
     stacking: 'strongest',
     school: 'fire',
-    defaults: { tick: { hp: -4 } },
+    defaults: { tick: { hp: -1 } },
+  },
+
+  /**
+   * The bat's whole contribution. It ticks once a second rather than twice like
+   * `burning`, so it reads as a slow drain the victim has time to notice — a bat
+   * that was chased down and killed has already done its whole job.
+   */
+  poisoned: {
+    name: 'Poisoned',
+    icon: '🧪',
+    kind: 'dot',
+    everyMs: 1000,
+    stacking: 'strongest',
+    defaults: { tick: { hp: -3 } },
   },
 
   iceBlock: {

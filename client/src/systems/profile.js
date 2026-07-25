@@ -73,6 +73,13 @@ export default {
         })
       }
 
+      // The sidebar's Character tab shows the TOTALS the server derived —
+      // attributes plus every modifier already folded in.
+      ctx.hud.setCharacter({
+        attributes: mine?.attributes ?? null,
+        stats: myDerivedStats,
+      })
+
       // Prediction has to walk at the same rate the server allows, or agility
       // would be a number in a panel and nothing else.
       if (myDerivedStats) {
@@ -229,13 +236,22 @@ function injectStyles() {
     #profile-panel .pf-name { font-size: 14px; }
     #profile-panel .fill.pf-exp { background: var(--accent); }
     #profile-panel .pf-gold { color: var(--accent); }
-    #profile-panel .pf-section { margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
+    #profile-panel .pf-section {
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 1.4px;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent);
+      text-shadow: 0 1px 2px #000;
+    }
     #profile-panel .pf-row {
       display: grid;
       grid-template-columns: 1fr auto;
       align-items: center;
       gap: 6px;
       line-height: 1.5;
+      border-bottom: 1px dotted #3a2d16;
     }
     /* The panel has to leave the action rail alone. */
     body.touch #profile-panel {

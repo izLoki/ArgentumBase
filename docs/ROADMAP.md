@@ -164,10 +164,28 @@ and their client halves.
 | **B1** | `shared/spells.js` in full: the melee slot 0 plus all fifteen definitions from `ARENA.md` §4.6, each with its `base` / `attr` / `scaling` triple (§4.2), plus `effectiveCooldown` and `spellDamage` | M0 | **done** |
 | **B2** | `spells` server: the executor, the `ACTIONS` registry, all seven targeting shapes, cooldowns from `cdr`, level-gated unlocks, the private spellbook | B1, A3 signature | **done** |
 | **B3** | `spells` client: six rail buttons, cooldown sweeps, auto-target plus long-press aiming, projectile / ray / impact rendering in `layers.fx` | B2 | **done** |
-| **B4a** | The seven monster abilities of `ARENA.md` §5.1 as `cls: 'npc'` rows in `shared/spells.js`, plus the `poisoned` row in `shared/effects.js` | B2 | |
-| **B4b** | `npc` server: the four-monster table, spawner, `registerBlocker` and `registerTargetProvider`, casting through B2's executor, drops through `loot.spawnDrop` | B4a, A3 | |
-| **B4c** | `npc` AI: first-off-cooldown-in-range ability choice, plus the two `behaviour` values — `brawler` and the bat's `hitAndRun` | B4b | |
-| **B5** | `npc` client: mob rendering with health bars in `layers.entities`, and `mobViewPosition` for other systems to anchor FX | B4b | |
+| **B4a** | The seven monster abilities of `ARENA.md` §5.1 as `cls: 'npc'` rows in `shared/spells.js`, plus the `poisoned` row in `shared/effects.js` | B2 | **done** |
+| **B4b** | `npc` server: the four-monster table, spawner, `registerBlocker` and `registerTargetProvider`, casting through B2's executor. Drops need no wiring — `loot` listens to `onKill` itself | B4a, A3 | **done** |
+| **B4c** | `npc` AI: first-off-cooldown-in-range ability choice, plus the two `behaviour` values — `brawler` and the bat's `hitAndRun` | B4b | **done** |
+| **B5** | `npc` client: mob rendering with health bars in `layers.entities`, and `mobViewPosition` for other systems to anchor FX | B4b | **done** |
+
+Three things came out of B4 that were not in the plan:
+
+- **The roster lives in `shared/mobs.js`.** The snapshot sends a type INDEX, so
+  the client needs the same ordered table to know what a `2` is and how to draw
+  it — the identical reason `shared/spells.js` is shared. `server/systems/npc.js`
+  imports it and re-exports `MOB_TYPES` / `MOB_TYPE_IDS`, and remains the only
+  writer of mob state.
+- **The population is derived from the map, not authored.** `BLOCKS_PER_MOB`
+  divides the walkable block count, which lands on the two dozen `ARENA.md` §5
+  names for the current valley and follows the map if it grows. It is also the
+  economy's faucet: monster coins are minted, so raising the density raises the
+  money supply (`ARENA.md` §1.5).
+- **The direct targeting shapes now skip the caster's own team.** `melee`, `ray`
+  and `dash` used to exclude only the caster itself, which was correct while
+  everyone was their own team — with a pack of monsters chasing one player it
+  made them cleave each other apart. The projectile path already asked exactly
+  this question; nothing changes for players.
 
 Two contract notes came out of B2:
 

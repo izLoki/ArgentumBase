@@ -20,9 +20,11 @@ import { input } from './input.js'
 import { movement } from './movement.js'
 import { viewport } from './viewport.js'
 import { hud } from './ui/hud.js'
+import { minimap } from './ui/minimap.js'
 import { chat } from './ui/chat.js'
 import { touch, action } from './ui/touch.js'
 import { initSystems, invokeClient } from './systems/index.js'
+import { ambience } from './ambience.js'
 
 const PING_INTERVAL_MS = 2000
 
@@ -58,8 +60,10 @@ formEl.addEventListener('submit', (e) => {
   e.preventDefault() // never let the browser navigate away
   clearError()
   submitEl.disabled = true
-  // Fullscreen and the orientation lock are only granted inside a gesture.
+  // Fullscreen, the orientation lock and audio autoplay are only granted
+  // inside a gesture.
   viewport.requestLandscape()
+  ambience.start()
   connect(
     document.getElementById('login-name').value.trim(),
     document.getElementById('login-class').value,
@@ -97,7 +101,7 @@ function connect(name, cls) {
     }
 
     loginEl.classList.add('hidden')
-    drawTilemap(layers.ground, map)
+    drawTilemap(layers, map, app)
 
     // Everything below binds listeners or timers exactly once. A reconnect
     // delivers a fresh WELCOME with a new player id, and re-running this
@@ -109,6 +113,7 @@ function connect(name, cls) {
     worldStarted = true
 
     hud.mount()
+    minimap.mount()
     chat.mount()
     input.start()
     touch.mount() // before the systems, so their action buttons find the rail
@@ -145,6 +150,7 @@ function onFrame(ticker) {
   syncEntities(layers.entities, ticker.deltaMS)
   updateCamera(app, layers.camera)
   hud.update()
+  minimap.update()
   invokeClient('onUpdate', ctx, ticker.deltaMS)
 }
 

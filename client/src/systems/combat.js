@@ -20,6 +20,7 @@
 import { Container, Graphics, Text } from 'pixi.js'
 import { S2C, C2S } from '@shared/protocol.js'
 import { tileCentre, viewPosition, viewHeadY } from '../render/entities.js'
+import { mobViewPosition } from './npc.js'
 
 /**
  * Mirror of RESPAWN_DELAY_MS in server/systems/combat.js — keep them in sync.
@@ -268,6 +269,11 @@ function anchorOf(kind, id, tx, ty) {
   if (kind === 'player') {
     const head = headAnchor(id)
     if (head) return head
+  } else {
+    // A mob's drawing is interpolated too, so its numbers ride it rather than
+    // the tile — `npc` exports the same anchor players get from `entities`.
+    const pos = mobViewPosition(id)
+    if (pos) return { x: pos.x, y: pos.y + BARE_HEAD_Y }
   }
   return { x: tileCentre(tx), y: tileCentre(ty) + BARE_HEAD_Y }
 }

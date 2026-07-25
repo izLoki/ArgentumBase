@@ -41,7 +41,15 @@ import { isWalkable, canStand } from '../world/map.js'
 import { isTileOccupied } from '../game/state.js'
 import { profileOf, statsOf } from './profile.js'
 import { applyEffect, hasFlag } from './effects.js'
-import { applyDamage, heal, handleOf, teamOf, targetAt, targetsInRadius } from './combat.js'
+import {
+  applyDamage,
+  heal,
+  handleOf,
+  teamOf,
+  posOf,
+  targetAt,
+  targetsInRadius,
+} from './combat.js'
 
 /**
  * What a spell is cast BY. Players and mobs both wear this shape, which is the
@@ -94,7 +102,7 @@ export default {
   init(ctx) {
     ctx.world.ext.spells = { projectiles: [], zones: [], nextId: 1 }
     registerBuiltinActions()
-    ctx.log('spells ready: one executor, seven targeting shapes')
+    ctx.log('spells ready: one executor, eight targeting shapes')
   },
 
   onPlayerJoin(ctx, player) {
@@ -277,10 +285,32 @@ const SHAPES = {
       const x = caster.x + vec.x * step
       const y = caster.y + vec.y * step
       const hit = targetAt(ctx, x, y)
-      if (hit && hit.ref !== caster.ref) return { at: { x, y }, hits: [hit] }
+      if (isEnemy(caster, hit)) return { at: { x, y }, hits: [hit] }
     }
     // A whiff still costs the cooldown: swinging at air is a decision.
     return { at: aheadOf(caster, reach), hits: [] }
+  },
+
+  /**
+   * The closest enemy within reach, whatever the caster is facing.
+   *
+   * `melee` asks the player to line a body up on an 8 px grid while the stick
+   * is still turning them; a class's basic strike cannot lose swings to that.
+   * The client sends no coordinates for this shape — the server picks, so
+   * there is nothing to tamper with.
+   */
+  nearest(ctx, caster, def) {
+    const reach = blocksToTiles(def.range)
+    const found = bodiesInRadius(ctx, caster.x, caster.y, reach, {
+      exclude: casterTargetHandle(caster),
+      team: caster.team,
+    })
+
+    const hit = closestTo(caster, found)
+    if (!hit) return { at: aheadOf(caster, reach), hits: [] }
+
+    const at = posOf(hit) ?? { x: caster.x, y: caster.y }
+    return { at, hits: [hit] }
   },
 
   /** A point the caster picked. Blink, Hunter's Mark, Trap, Volley. */
@@ -326,7 +356,7 @@ const SHAPES = {
 
       for (let off = -half; off <= half; off++) {
         const hit = targetAt(ctx, cx + perp.x * off, cy + perp.y * off)
-        if (!hit || hit.ref === caster.ref || seen.has(hit.ref)) continue
+        if (!isEnemy(caster, hit) || seen.has(hit.ref)) continue
         seen.add(hit.ref)
         hits.push(hit)
       }
@@ -357,16 +387,23 @@ const SHAPES = {
   },
 
   /**
-   * Moves the caster instead of reaching out. Charge stops at the first body
-   * and that body is the hit; Roll phases through and hits nothing.
+   * Moves the caster instead of reaching out.
+   *
+   * Three knobs, and every dash in the table is a combination of them: a
+   * non-phasing dash stops at the first body and that body is the hit; a
+   * `sweeps` dash cuts down everything its path crossed; Roll sets neither and
+   * simply travels.
    */
   dash(ctx, caster, def) {
     const vec = DIR_VEC[caster.dir]
     const reach = blocksToTiles(def.range)
+    const self = casterTargetHandle(caster)
 
     let x = caster.x
     let y = caster.y
     let blocker = null
+    /** ref -> handle: one body crossed twice is still one hit. */
+    const swept = new Map()
 
     for (let step = 1; step <= reach; step++) {
       const nx = caster.x + vec.x * step
@@ -375,13 +412,21 @@ const SHAPES = {
 
       if (!def.phasing) {
         const hit = targetAt(ctx, nx, ny)
-        if (hit && hit.ref !== caster.ref) {
+        if (isEnemy(caster, hit)) {
           blocker = hit
           break
         }
       }
       x = nx
       y = ny
+
+      // Bodies are wider than the line the caster walks, so the sweep asks who
+      // TOUCHED the path rather than who stood exactly on it.
+      if (def.sweeps) {
+        for (const hit of bodiesInRadius(ctx, nx, ny, 0, { exclude: self, team: caster.team })) {
+          swept.set(hit.ref, hit)
+        }
+      }
     }
 
     // Phasing passes THROUGH bodies, not INTO one: if the landing spot is
@@ -393,8 +438,10 @@ const SHAPES = {
       }
     }
 
+    if (blocker) swept.set(blocker.ref, blocker)
+
     moveCaster(ctx, caster, x, y)
-    return { at: { x, y }, hits: blocker ? [blocker] : [] }
+    return { at: { x, y }, hits: [...swept.values()] }
   },
 }
 
@@ -787,6 +834,28 @@ function bodiesInRadius(ctx, x, y, radius, opts) {
 }
 
 /**
+ * The closest of a set of targets, by Chebyshev distance — the same metric
+ * every range in this file uses, so "in reach" and "nearest" never disagree.
+ *
+ * @returns {Object|null} the handle, or null for an empty set
+ */
+function closestTo(caster, targets) {
+  let best = null
+  let bestDistance = Infinity
+
+  for (const target of targets) {
+    const pos = posOf(target)
+    if (!pos) continue
+
+    const distance = Math.max(Math.abs(pos.x - caster.x), Math.abs(pos.y - caster.y))
+    if (distance >= bestDistance) continue
+    best = target
+    bestDistance = distance
+  }
+  return best
+}
+
+/**
  * Where the cast is pointed.
  *
  * A client that sends coordinates gets them clamped to the spell's reach
@@ -903,6 +972,19 @@ function refuse(ctx, caster, spellId, reason) {
     ctx.sendTo(caster.ref.id, S2C.SPELL_FAILED, { id: spellId, reason })
   }
   return false
+}
+
+/**
+ * Whether a struck target is something this caster is allowed to hit.
+ *
+ * The team check is what the projectile path already used to walk a bolt out of
+ * its own caster's body; the direct shapes ask the same question so a pack of
+ * monsters cannot cleave each other apart while chasing the same player. For
+ * players nothing changes: everyone is their own team, so every other player is
+ * an enemy and only the caster is excluded.
+ */
+function isEnemy(caster, hit) {
+  return !!hit && hit.ref !== caster.ref && teamOf(hit) !== caster.team
 }
 
 /** The caster seen as something that can be hit, for self-targeted actions. */

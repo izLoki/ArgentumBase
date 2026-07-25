@@ -10,7 +10,10 @@
 
 export const XP_REWARD = {
   player: { warrior: 130, mage: 140, hunter: 135 },
-  npc: { wisp: 28, imp: 30, golem: 45, dragon: 80 },
+  // A bat is worth roughly a quarter of a dragon, which is about the ratio of
+  // effort: the dragon is the only monster that can actually kill a healthy
+  // player, and the bat is a mosquito that flees on contact.
+  npc: { bat: 22, skeleton: 30, golem: 55, dragon: 95 },
 }
 
 /**
@@ -21,7 +24,7 @@ export const XP_REWARD = {
  * `PURSE_LOOT_PCT`. That is why there is no `player` row here.
  */
 export const COIN_REWARD = {
-  npc: { wisp: 9, imp: 10, golem: 14, dragon: 26 },
+  npc: { bat: 7, skeleton: 10, golem: 14, dragon: 26 },
 }
 
 /**

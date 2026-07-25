@@ -1,11 +1,12 @@
 :root {
-  --bg: #0e0f12;
-  --panel: rgba(18, 20, 26, 0.86);
-  --border: #2b303c;
-  --text: #dfe3ea;
-  --muted: #8b93a4;
+  /* Old-school medieval: dark timber, bronze frames, parchment text, gold. */
+  --bg: #0a0805;
+  --panel: rgba(26, 19, 11, 0.92);
+  --border: #4a3a1e;
+  --text: #e8dcc2;
+  --muted: #a3906c;
   --accent: #d9b14f;
-  --hp: #c0392b;
+  --hp: #a8231d;
   --xp: #b8912f; /* there is no mana: the second bar is experience */
 
   /* Notches and rounded corners. Anchor every HUD element to these. */
@@ -31,7 +32,7 @@ html, body {
   height: var(--app-h);
   background: var(--bg);
   color: var(--text);
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-family: Georgia, 'Palatino Linotype', 'Times New Roman', serif;
   overflow: hidden;
   overscroll-behavior: none;
 }
@@ -66,16 +67,25 @@ body.touch textarea {
   padding: calc(12px + var(--safe-t)) calc(12px + var(--safe-r)) calc(12px + var(--safe-b))
     calc(12px + var(--safe-l));
   overflow: auto;
-  background: radial-gradient(circle at 50% 40%, #171a21, #08090c);
+  background: radial-gradient(circle at 50% 40%, #1c1409, #060402);
   z-index: 20;
 }
 
+/* The one panel chrome everything shares: dark timber inside a bronze frame,
+   sharp corners, a vignette. Rustic — not a website card. */
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 220, 140, 0.04), rgba(0, 0, 0, 0) 70px),
+    linear-gradient(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2)),
+    var(--panel);
+  border: 1px solid #060402;
+  border-radius: 2px;
+  box-shadow:
+    inset 0 0 0 1px #6b5426,
+    inset 0 0 0 2px rgba(0, 0, 0, 0.55),
+    inset 0 0 22px rgba(0, 0, 0, 0.5),
+    0 6px 18px rgba(0, 0, 0, 0.55);
   padding: 16px;
-  backdrop-filter: blur(4px);
 }
 
 .panel.compact { padding: 10px; }
@@ -87,7 +97,15 @@ body.touch textarea {
   gap: 10px;
 }
 
-#login-form h1 { margin: 0; font-size: 26px; letter-spacing: 1px; }
+#login-form h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: 3px;
+  font-variant: small-caps;
+  text-align: center;
+  color: var(--accent);
+  text-shadow: 0 2px 4px #000;
+}
 .muted, .hint { color: var(--muted); font-size: 12px; margin: 0; }
 
 .error {
@@ -108,20 +126,32 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color:
 input, select, button {
   font: inherit;
   padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: #14161c;
+  border-radius: 2px;
+  border: 1px solid #060402;
+  box-shadow: inset 0 0 0 1px var(--border), inset 0 2px 6px rgba(0, 0, 0, 0.55);
+  background: #171008;
   color: var(--text);
 }
 
+/* Buttons read as cast bronze: bevelled, lit from above, pressed inward. */
 button {
-  background: var(--accent);
-  color: #1a1509;
-  font-weight: 600;
+  background: linear-gradient(#7a5a26, #573e14 55%, #3d2a0c);
+  box-shadow:
+    inset 0 0 0 1px #8a6a2f,
+    inset 0 1px 0 rgba(255, 226, 150, 0.3),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.45);
+  color: #f2e4bd;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.7);
+  font-weight: 700;
+  letter-spacing: 0.6px;
   cursor: pointer;
-  border: none;
+  border: 1px solid #060402;
 }
-button:hover { filter: brightness(1.1); }
+button:hover { filter: brightness(1.12); }
+button:active {
+  box-shadow: inset 0 0 0 1px #8a6a2f, inset 0 3px 6px rgba(0, 0, 0, 0.6);
+  filter: brightness(0.95);
+}
 
 /* Anything under 16px makes iOS Safari zoom the page on focus. */
 body.touch input,
@@ -153,14 +183,16 @@ body.touch select {
 .bar {
   position: relative;
   height: 16px;
-  background: #0a0b0f;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  background: #0d0a06;
+  border: 1px solid #060402;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px var(--border), inset 0 2px 5px rgba(0, 0, 0, 0.75);
   overflow: hidden;
 }
-.bar .fill { position: absolute; inset: 0; width: 100%; transform-origin: left; }
-.fill.hp { background: var(--hp); }
-.fill.xp { background: var(--xp); }
+.bar .fill { position: absolute; inset: 2px; width: auto; transform-origin: left; }
+/* Liquid in a trough: a hot top edge, a dark bottom. */
+.fill.hp { background: linear-gradient(#d4574d, var(--hp) 45%, #6e120d); }
+.fill.xp { background: linear-gradient(#e3c469, var(--xp) 45%, #7d5d18); }
 .bar b {
   position: relative;
   display: block;
@@ -283,8 +315,9 @@ body.touch #chat-toggle {
   height: 44px;
   padding: 0;
   border-radius: 50%;
-  border: 1px solid var(--border);
-  background: rgba(18, 20, 26, 0.7);
+  border: 2px solid #060402;
+  box-shadow: inset 0 0 0 2px #6b5426, inset 0 2px 6px rgba(0, 0, 0, 0.6);
+  background: radial-gradient(circle at 50% 32%, rgba(48, 36, 19, 0.92), rgba(15, 10, 5, 0.92));
   color: var(--text);
   font-size: 18px;
   z-index: 12;
@@ -308,7 +341,8 @@ body.touch #chat-toggle {
   margin: -58px 0 0 -58px;
   border-radius: 50%;
   border: 2px solid rgba(217, 177, 79, 0.35);
-  background: rgba(18, 20, 26, 0.32);
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.4);
+  background: rgba(24, 17, 9, 0.35);
   pointer-events: none;
 }
 
@@ -337,19 +371,29 @@ body.touch #chat-toggle {
   pointer-events: none;
 }
 
+/* Round bronze medallions rather than glassy web buttons. */
 .action-btn {
   pointer-events: auto;
   width: 58px;
   height: 58px;
   padding: 0;
   border-radius: 50%;
-  border: 1px solid var(--border);
-  background: rgba(18, 20, 26, 0.7);
+  border: 2px solid #060402;
+  box-shadow:
+    inset 0 0 0 2px #6b5426,
+    inset 0 2px 6px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+  background: radial-gradient(circle at 50% 32%, rgba(48, 36, 19, 0.92), rgba(15, 10, 5, 0.92));
   color: var(--text);
+  text-shadow: 0 1px 2px #000;
   font-size: 13px;
   font-weight: 600;
 }
-.action-btn.down { background: var(--accent); color: #1a1509; }
+.action-btn.down {
+  background: radial-gradient(circle at 50% 32%, #e8c76a, #a87f2a);
+  color: #1a1509;
+  text-shadow: none;
+}
 
 /* ---------- Utility column ----------
    Top right, under the chat toggle. Panels and toggles live here so the thumb
@@ -369,7 +413,6 @@ body.touch #chat-toggle {
   width: 44px;
   height: 44px;
   font-size: 18px;
-  background: rgba(18, 20, 26, 0.7);
 }
 
 /* ---------- Portrait guard ---------- */
