@@ -16,8 +16,8 @@ TypeScript, no build step on the server, no assets to download.
   live, at 15 snapshots per second with client-side interpolation.
 - Deterministic map generation (walled town, lake, forest, roads).
 - Global chat with rate limiting.
-- A minimal HUD: health, mana, name, and a debug line with tile, tick, ping
-  and player count.
+- A minimal HUD: health, experience, name, level, and a debug line with tile,
+  tick, ping and player count.
 - A **plugin system layer**: gameplay features are self-contained modules that
   register themselves, so several people can build different features in
   parallel with almost no chance of touching the same lines of code.

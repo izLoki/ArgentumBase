@@ -17,12 +17,13 @@ const STICK_RADIUS_PX = 46
 let root = null
 let base = null
 let knob = null
-let rail = null
+/** Where a button lands: 'rail' is the thumb corner, 'utility' the top right. */
+const containers = { rail: null, utility: null }
 let pointerId = null
 let originX = 0
 let originY = 0
 
-/** id -> button element. Populated before mount if a system registers early. */
+/** id -> { el, slot }. Populated before mount if a system registers early. */
 const buttons = new Map()
 
 export const touch = {
@@ -36,7 +37,13 @@ export const touch = {
 
     base = root.querySelector('#stick')
     knob = root.querySelector('#stick-knob')
-    rail = root.querySelector('#actions')
+    containers.rail = root.querySelector('#actions')
+
+    // Built here rather than in index.html: nine buttons do not fit one rail,
+    // and a feature author should never have to edit the markup to add one.
+    containers.utility = document.createElement('div')
+    containers.utility.id = 'actions-utility'
+    root.appendChild(containers.utility)
 
     const zone = root.querySelector('#stick-zone')
     zone.addEventListener('pointerdown', onDown)
@@ -44,16 +51,16 @@ export const touch = {
     zone.addEventListener('pointerup', onUp)
     zone.addEventListener('pointercancel', onUp)
 
-    for (const el of buttons.values()) rail.appendChild(el)
+    for (const { el, slot } of buttons.values()) mountButton(el, slot)
   },
 
   /** Prefer `action()` below: this only covers the mobile half. */
-  addButton({ id, label, onPress, onRelease }) {
+  addButton({ id, label, slot = 'rail', onPress, onRelease }) {
     if (!viewport.isTouch || buttons.has(id)) return
 
     const el = document.createElement('button')
     el.type = 'button'
-    el.className = 'action-btn'
+    el.className = slot === 'utility' ? 'action-btn utility' : 'action-btn'
     el.dataset.action = id
     el.textContent = label
 
@@ -70,13 +77,18 @@ export const touch = {
     el.addEventListener('pointercancel', release)
     el.addEventListener('pointerleave', release)
 
-    buttons.set(id, el)
-    rail?.appendChild(el)
+    buttons.set(id, { el, slot })
+    mountButton(el, slot)
   },
 
   removeButton(id) {
-    buttons.get(id)?.remove()
+    buttons.get(id)?.el.remove()
     buttons.delete(id)
+  },
+
+  /** The button element of an action, for systems that decorate it (cooldowns). */
+  buttonOf(id) {
+    return buttons.get(id)?.el ?? null
   },
 }
 
@@ -85,10 +97,19 @@ export const touch = {
  * key directly.
  *
  *   ctx.action({ id: 'attack', label: '⚔', key: 'ControlLeft', onPress: fn })
+ *
+ * `slot` decides where the on-screen button goes:
+ *   'rail'    (default) bottom-right thumb rail — things used mid-fight
+ *   'utility' top-right column — panels and toggles, next to the chat button
  */
-export function action({ id, label, key, onPress, onRelease }) {
+export function action({ id, label, key, slot = 'rail', onPress, onRelease }) {
   if (key) input.onKey(key, () => onPress?.())
-  touch.addButton({ id, label, onPress, onRelease })
+  touch.addButton({ id, label, slot, onPress, onRelease })
+}
+
+function mountButton(el, slot) {
+  const parent = containers[slot] ?? containers.rail
+  parent?.appendChild(el)
 }
 
 function onDown(e) {

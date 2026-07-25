@@ -47,18 +47,46 @@ cdr:        Math.min(45, a.int * 1.2) // percent, clamped again at the use site
 
 ### 1.2 Growth per level
 
+There is no open-ended growth. Every class shares the same **max level** —
+the highest level reachable in the arena — and a fixed attribute total to
+reach by then. A level-up does not add a constant per-level increment;
+instead each attribute is interpolated linearly between the class's base
+value at level 1 and its target total at `MAX_LEVEL`, so the numbers land on
+the target exactly regardless of how `MAX_LEVEL` or the totals get tuned
+later.
+
 ```js
-export const GROWTH_PER_LEVEL = {
-  warrior: { str: 2, agi: 1, int: 0, con: 2 },
-  mage:    { str: 0, agi: 1, int: 3, con: 1 },
-  hunter:  { str: 1, agi: 3, int: 1, con: 1 },
+export const MAX_LEVEL = 20 // same cap for every class
+
+// Total attribute points gained between level 1 and MAX_LEVEL, per class.
+export const GROWTH_TOTAL = {
+  warrior: { str: 38, agi: 19, int: 0,  con: 38 },
+  mage:    { str: 0,  agi: 19, int: 57, con: 19 },
+  hunter:  { str: 19, agi: 57, int: 19, con: 19 },
+}
+
+export function attributesAtLevel(cls, level) {
+  const base = BASE_ATTRIBUTES[cls] ?? BASE_ATTRIBUTES.warrior
+  const total = GROWTH_TOTAL[cls] ?? {}
+  const t = (Math.min(level, MAX_LEVEL) - 1) / (MAX_LEVEL - 1)
+  const out = {}
+  for (const attr of ATTRIBUTES) out[attr] = base[attr] + Math.round((total[attr] ?? 0) * t)
+  return out
 }
 ```
 
 Applied inside the existing level-up loop of `addExp`
-(`server/systems/profile.js`). `POINTS_PER_LEVEL` and `STARTING_POINTS` drop
-to `0`; the `PROFILE_SPEND_POINT` handler stays in place but can never
-succeed, so nothing on the client breaks.
+(`server/systems/profile.js`): once the loop settles on a new level,
+`profile.attributes = attributesAtLevel(profile.cls, profile.level)`
+replaces the whole set in one shot, rather than accumulating deltas.
+Recomputing from `level` instead of adding a per-level delta is what
+guarantees the total lands exactly on `GROWTH_TOTAL` at `MAX_LEVEL`, with no
+rounding drift from repeated additions. XP stops mattering once
+`profile.level` reaches `MAX_LEVEL` — the loop guard simply stops advancing.
+
+`POINTS_PER_LEVEL` and `STARTING_POINTS` stay at `0`; the
+`PROFILE_SPEND_POINT` handler stays in place but can never succeed, so
+nothing on the client breaks.
 
 ### 1.3 Kill rewards
 
@@ -273,7 +301,7 @@ export const CLASS_SPELLS = {
   warrior: ['cleave', 'charge', 'warCry', 'shieldWall', 'whirlwind'],
   hunter:  ['piercingShot', 'trap', 'huntersMark', 'roll', 'volley'],
 }
-export const UNLOCK_LEVELS = [1, 1, 1, 8, 14]   // by slot index
+export const UNLOCK_LEVELS = [1, 1, 1, 10, 20]  // by slot index
 
 export function effectiveCooldown(def, stats) {
   const cdr = Math.min(45, (stats?.cdr ?? 0) * def.intScaling) / 100
@@ -320,10 +348,23 @@ duplicated projectile code.
 
 ### 4.4 Learning and unlocking
 
+Five slots, always in the same shape: **three basic spells unlocked from
+level 1**, a fourth at level 10, a fifth at level 20 — the same level as
+`MAX_LEVEL` (§1.2), so the last spell arrives exactly when a player hits the
+level cap for their class.
+
 `spells.onPlayerJoin` seeds `known = CLASS_SPELLS[cls].slice(0, 3)`. On level
 up it compares `profile.level` against `UNLOCK_LEVELS` and pushes newly
 unlocked ids. The spellbook and cooldowns are private, so they go out with
 `ctx.sendTo`, never in the snapshot.
+
+Each slot is bound with `ctx.action({ id, key: 'Digit1' … 'Digit5', ... })`
+in slot order, which is what puts `S1`–`S5` on the action rail (§8) for
+touch **and** the `1`–`5` keys on desktop in the same call — a one-to-one
+hotbar, attack (`⚔`) excluded since it is not a spell slot. A locked slot
+still renders (opacity `.35`, lock glyph, §8) but its key press and button
+tap both no-op client-side; the server rejects the cast regardless via
+`SPELL_FAILED` if one somehow reaches it.
 
 ### 4.5 The spell sets
 
@@ -335,7 +376,7 @@ unlocked ids. The spellbook and cooldowns are private, so they go out with
 | 2 | **Lightning Ray** | ray, range 7 | instant, `pierce: true`, hits everything in the line |
 | 3 | **Blink** | tile + `teleport` | range 5, instant, destination must be walkable and free |
 | 4 | **Frost Nova** *(proposed)* | aoe radius 2 on self | small damage + `rooted 1.5s`. The escape enabler that pairs with Blink and sets up the ice theme. *Alternative:* **Arcane Barrier**, absorbs N damage for 6s, if a defensive slot 4 is preferred |
-| 5 | **Ice Block** (L14) | self | `flags {invulnerable, rooted, silenced}` + `tick {hp:+6 / 500ms}`, 4s. The spec's "total protection plus regeneration, immobile" |
+| 5 | **Ice Block** (L20) | self | `flags {invulnerable, rooted, silenced}` + `tick {hp:+6 / 500ms}`, 4s. The spec's "total protection plus regeneration, immobile" |
 
 **Warrior** — proposal.
 
@@ -344,8 +385,8 @@ unlocked ids. The spellbook and cooldowns are private, so they go out with
 | 1 | **Cleave** | ray range 1, width 3 | a cone, instant, scales with `str` |
 | 2 | **Charge** | dash up to 4 tiles | stops at the first enemy, damage + `stunned 0.8s` |
 | 3 | **War Cry** | self buff | +damage / +defense for 6s |
-| 4 | **Shield Wall** (L8) | self | `taken -60%` for 4s with `slowed` attached — one effect carrying a buff *and* a debuff |
-| 5 | **Whirlwind** (L14) | aoe radius 1 on self | hits everything, short cooldown. *Alternative:* **Execute**, heavy damage below 30% target HP |
+| 4 | **Shield Wall** (L10) | self | `taken -60%` for 4s with `slowed` attached — one effect carrying a buff *and* a debuff |
+| 5 | **Whirlwind** (L20) | aoe radius 1 on self | hits everything, short cooldown. *Alternative:* **Execute**, heavy damage below 30% target HP |
 
 **Hunter** — proposal.
 
@@ -354,8 +395,8 @@ unlocked ids. The spellbook and cooldowns are private, so they go out with
 | 1 | **Piercing Shot** | projectile, `speedTps 14` | `pierce: true`, range 9, scales with `agi` |
 | 2 | **Trap** | spawnZone within 2 tiles | invisible to enemies, roots the first one to enter for 2s |
 | 3 | **Hunter's Mark** | tile, instant | `marked` for 8s: the victim takes +20% from everyone |
-| 4 | **Roll** (L8) | dash 3 tiles | passes through entities, +evasion for 1.5s |
-| 5 | **Volley** (L14) | spawnZone, radius 1 | ticking damage for 2s |
+| 4 | **Roll** (L10) | dash 3 tiles | passes through entities, +evasion for 1.5s |
+| 5 | **Volley** (L20) | spawnZone, radius 1 | ticking damage for 2s |
 
 Between the three classes every `targeting` value and every `ACTIONS` entry
 gets exercised, which is what keeps the registry honest.
@@ -552,7 +593,7 @@ in milestone M0 — see `ROADMAP.md`.
 |---|---|---|
 | `archer` → `hunter` | `shared/constants.js`, `shared/profile.js`, `client/index.html` | class list |
 | `spellPower` and `cdr` in `STAT_KEYS` and `deriveStats` | `shared/profile.js` | intelligence needs somewhere to land |
-| Mana removed from the derived-stat surface and the HUD; the MP bar becomes an XP bar | `shared/profile.js`, `server/systems/profile.js`, `client/src/ui/hud.js`, `client/index.html` | there is no mana. The vestigial `player.mana` fields stay — removing them means editing the core for no gain |
-| `GROWTH_PER_LEVEL` applied inside `addExp` | `shared/profile.js`, `server/systems/profile.js` | attributes grow on level up |
+| Mana removed entirely — the derived stats, the HUD (the MP bar becomes an XP bar) and the `player.mana` core fields | `shared/profile.js`, `server/systems/profile.js`, `shared/constants.js`, `server/game/state.js`, `client/src/ui/hud.js`, `client/index.html` | there is no mana. Leaving dead fields on the player would just invite a system to start writing them |
+| `MAX_LEVEL` / `GROWTH_TOTAL` / `attributesAtLevel` applied inside `addExp` | `shared/profile.js`, `server/systems/profile.js` | attributes grow toward a fixed per-class target, capped at a shared max level |
 | `registerMoveGate(fn)` plus one guard in the `MOVE` handler | `server/game/state.js`, `server/systems/core.js` | `rooted` and `stunned` need to stop movement without hacking the core |
 | `ctx.action({ ..., slot: 'rail'\|'utility' })` and an `#actions-utility` container built in JS | `client/src/ui/touch.js`, `CLAUDE.md` | nine buttons do not fit one rail, and every feature author inventing their own floating button is worse |

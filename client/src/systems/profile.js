@@ -37,6 +37,7 @@ export default {
       id: 'profile',
       label: '👤',
       key: 'KeyP',
+      slot: 'utility', // a panel toggle, not something used mid-fight
       onPress: () => togglePanel(),
     })
   },
@@ -54,9 +55,11 @@ export default {
       mine = payload?.profile ?? null
       myDerivedStats = payload?.stats ?? null
 
-      // The snapshot carries no mana, so the profile feeds the HUD bar.
-      const vitals = payload?.vitals
-      if (vitals) ctx.hud.setStats({ mana: vitals.mana, maxMana: vitals.maxMana })
+      // Experience and level are private, so the snapshot cannot carry them:
+      // the profile is the only thing that can feed the HUD's second bar.
+      if (mine) {
+        ctx.hud.setStats({ exp: mine.exp, expToNext: mine.expToNext, level: mine.level })
+      }
 
       render()
       for (const fn of listeners) {

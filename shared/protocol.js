@@ -21,7 +21,7 @@
 /** Client -> Server */
 export const C2S = {
   // --- core ---
-  JOIN: 'core:join', // { name: string, cls: 'warrior'|'mage'|'archer' }
+  JOIN: 'core:join', // { name: string, cls: 'warrior'|'mage'|'hunter' }
   MOVE: 'core:move', // { dir: 0|1|2|3 }
   FACE: 'core:face', // { dir: 0|1|2|3 }
   PING: 'core:ping', // { t: number }
@@ -31,6 +31,16 @@ export const C2S = {
 
   // --- profile ---
   PROFILE_SPEND_POINT: 'profile:spendPoint', // { attr: 'str'|'agi'|'int'|'con' }
+
+  // --- combat ---
+  COMBAT_ATTACK: 'combat:attack', // {} melee in the facing direction
+  COMBAT_RESPAWN: 'combat:respawn', // {} early respawn once the timer allows
+
+  // --- spells ---
+  SPELL_CAST: 'spells:cast', // { id, tx?, ty?, dir? }
+
+  // --- inventory ---
+  INVENTORY_BUY: 'inventory:buy', // { slot: 'weapon'|'armor'|'focus'|'boots' }
 
   // --- add your system's events below, in their own block ---
 }
@@ -47,8 +57,32 @@ export const S2C = {
   CHAT_MSG: 'chat:msg', // { from, fromId, text, channel: 'say'|'system' }
 
   // --- profile ---
-  PROFILE_SELF: 'profile:self', // { profile, stats, vitals } — owner only, never broadcast
+  PROFILE_SELF: 'profile:self', // { profile, stats } — owner only, never broadcast
   PROFILE_LEVEL_UP: 'profile:levelUp', // { id, level }
+
+  // --- combat ---
+  COMBAT_HIT: 'combat:hit', // { x, y, kind, id, amount, crit, school, byId }
+  COMBAT_DEATH: 'combat:death', // { kind, id, name, killerId, killerName }
+  COMBAT_RESPAWNED: 'combat:respawned', // { id, x, y, protectedMs }
+  COMBAT_KILLFEED: 'combat:killfeed', // { killerName, victimName, victimKind, reward:{exp,coins} }
+
+  // --- effects ---
+  EFFECTS_SELF: 'effects:self', // owner only { active: [{ id, endsAt, stacks }] }
+
+  // --- spells ---
+  SPELL_BOOK: 'spells:book', // owner only { known: [{ id, slot, unlocked }] }
+  SPELL_COOLDOWN: 'spells:cooldown', // owner only { id, untilMs }
+  SPELL_CAST_FX: 'spells:castFx', // { casterKind, casterId, id, x0, y0, tx, ty, dir, projId? }
+  SPELL_RAY: 'spells:ray', // { id, x0, y0, x1, y1 }
+  SPELL_IMPACT: 'spells:impact', // { id, x, y, radius }
+  SPELL_FAILED: 'spells:failed', // owner only { id, reason }
+
+  // --- inventory ---
+  INVENTORY_SELF: 'inventory:self', // owner only { tiers, nextCosts }
+
+  // --- loot ---
+  LOOT_PICKED: 'loot:picked', // { id, byId, type }
+  LOOT_EXPLODE: 'loot:explode', // { id, x, y, radius }
 
   // --- add your system's events below, in their own block ---
 }

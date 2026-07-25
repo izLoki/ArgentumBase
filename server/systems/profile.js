@@ -21,8 +21,9 @@
 import { C2S, S2C, ERROR_CODE } from '../../shared/protocol.js'
 import {
   ATTRIBUTES,
-  LEVEL_MAX,
+  MAX_LEVEL,
   POINTS_PER_LEVEL,
+  attributesAtLevel,
   createProfile,
   deriveStats,
   expForLevel,
@@ -30,8 +31,12 @@ import {
   toPublicProfile,
 } from '../../shared/profile.js'
 
-/** Free points on join, so the demo has something to spend on the spot. */
-const STARTING_POINTS = 5
+/**
+ * Attributes grow on the class curve, not by hand, so nobody starts with
+ * points. `PROFILE_SPEND_POINT` stays wired but can never succeed — dropping
+ * the handler would break the client panel for no gain.
+ */
+const STARTING_POINTS = 0
 
 export default {
   id: 'profile',
@@ -54,7 +59,6 @@ export default {
 
     recompute(ctx, player)
     player.hp = player.maxHp
-    player.mana = player.maxMana
   },
 
   /** Private data cannot ride the snapshot, so it is pushed to its owner. */
@@ -116,16 +120,20 @@ export function addExp(ctx, player, amount) {
   profile.exp += Math.floor(amount)
 
   let gained = 0
-  while (profile.level < LEVEL_MAX && profile.exp >= profile.expToNext) {
+  while (profile.level < MAX_LEVEL && profile.exp >= profile.expToNext) {
     profile.exp -= profile.expToNext
     profile.level += 1
     profile.points += POINTS_PER_LEVEL
     profile.expToNext = expForLevel(profile.level)
     gained += 1
   }
-  if (profile.level >= LEVEL_MAX) profile.exp = 0
+  if (profile.level >= MAX_LEVEL) profile.exp = 0
 
   if (gained > 0) {
+    // Who you killed never steers which attribute grows: the class does.
+    // Recomputed from `level` rather than accumulated so it lands exactly on
+    // GROWTH_TOTAL at MAX_LEVEL, with no rounding drift.
+    profile.attributes = attributesAtLevel(profile.cls, profile.level)
     ctx.broadcast(S2C.PROFILE_LEVEL_UP, { id: player.id, level: profile.level })
     ctx.announce(`${profile.name} reached level ${profile.level}.`)
   }
@@ -188,19 +196,16 @@ function recompute(ctx, player) {
   slot.dirty = true
 }
 
-/** The profile owns the ceilings; the core keeps the current values. */
+/**
+ * The profile owns the ceiling; `combat` owns the current value. Clamping
+ * down is the one exception — a shrinking maxHp must not leave hp above it.
+ */
 function applyVitals(player, stats) {
   player.maxHp = stats.maxHp
-  player.maxMana = stats.maxMana
   player.hp = Math.min(player.hp, player.maxHp)
-  player.mana = Math.min(player.mana, player.maxMana)
 }
 
 function privatePacket(player) {
   const slot = player.ext.profile
-  return {
-    profile: slot.data,
-    stats: slot.stats,
-    vitals: { mana: player.mana, maxMana: player.maxMana },
-  }
+  return { profile: slot.data, stats: slot.stats }
 }

@@ -3,6 +3,10 @@
  *
  * DOM instead of Pixi on purpose — UI work and render work stay in separate
  * files, so two people can touch them without conflicting.
+ *
+ * There is no mana in this world, so the second bar is experience. HP comes
+ * from the snapshot every frame; experience and level are private and pushed
+ * here by the `profile` system through `setStats`.
  */
 
 import { state, self } from '../state.js'
@@ -16,24 +20,31 @@ export const hud = {
     els = {
       hpFill: document.getElementById('hp-fill'),
       hpText: document.getElementById('hp-text'),
-      mpFill: document.getElementById('mp-fill'),
-      mpText: document.getElementById('mp-text'),
+      xpFill: document.getElementById('xp-fill'),
+      xpText: document.getElementById('xp-text'),
       name: document.getElementById('hud-name'),
+      level: document.getElementById('hud-level'),
       debug: document.getElementById('debug'),
     }
   },
 
-  /** Systems can push authoritative stat updates here. */
-  setStats({ hp, maxHp, mana, maxMana }) {
+  /**
+   * Systems push authoritative readouts here rather than reaching into the
+   * HUD's elements — that is what keeps `combat` and `profile` off each
+   * other's toes.
+   */
+  setStats({ hp, maxHp, exp, expToNext, level } = {}) {
     if (!els) return
     if (hp !== undefined) {
       els.hpFill.style.transform = `scaleX(${maxHp ? hp / maxHp : 0})`
       els.hpText.textContent = `${hp}/${maxHp}`
     }
-    if (mana !== undefined) {
-      els.mpFill.style.transform = `scaleX(${maxMana ? mana / maxMana : 0})`
-      els.mpText.textContent = `${mana}/${maxMana}`
+    if (exp !== undefined) {
+      const ratio = expToNext > 0 ? Math.min(1, exp / expToNext) : 1
+      els.xpFill.style.transform = `scaleX(${ratio})`
+      els.xpText.textContent = expToNext > 0 ? `${exp}/${expToNext} xp` : 'max'
     }
+    if (level !== undefined) els.level.textContent = `Lv ${level}`
   },
 
   update() {

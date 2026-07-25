@@ -142,11 +142,54 @@ Client (built in `client/src/main.js`):
 | `ctx.app`, `ctx.layers` | Pixi application and draw layers |
 | `ctx.state`, `ctx.self()` | local mirror of the world |
 | `ctx.net` | `send` / `on` |
-| `ctx.action({id, label, key, onPress})` | one binding, keyboard **and** thumb button |
+| `ctx.action({id, label, key, slot, onPress})` | one binding, keyboard **and** thumb button. `slot: 'rail'` (default, bottom-right thumb rail) or `'utility'` (top-right column, for panels and toggles) |
 | `ctx.input.onKey(code, fn)` | keyboard-only binding (desktop-only features) |
 | `ctx.viewport` | `isTouch`, `isMobile`, `isPortrait`, `zoom`, `onChange(fn)` |
-| `ctx.touch` | `addButton` / `removeButton` when `action()` is not enough |
+| `ctx.touch` | `addButton` / `removeButton` / `buttonOf(id)` when `action()` is not enough |
 | `ctx.hud`, `ctx.chat` | HUD updates and message output |
+
+## The player profile
+
+Anything about *who a player is* — level, exp, gold, attributes and the stats
+derived from them — belongs to the `profile` system, not to your own state.
+Inventory, combat, stats panels and data features all read the same numbers
+from it instead of each keeping a copy.
+
+- Shape and formulas: `shared/profile.js` (pure data, imported by both sides).
+- Server: `server/systems/profile.js` owns it.
+- Client: `client/src/systems/profile.js` mirrors it, plus the 👤 panel (`P`).
+
+Server, from your own system:
+
+```js
+import { profileOf, statsOf, addExp, addGold, spendGold, setModifier } from './profile.js'
+
+const stats = statsOf(player)          // { maxHp, damage, defense, evasion, spellPower, cdr }
+addExp(ctx, player, 40)                // levels up and announces on its own
+if (!spendGold(ctx, player, 25)) return ctx.fail(player, 'BAD_PAYLOAD', 'not enough gold')
+```
+
+Never write `level`, `gold` or a stat by hand. To contribute bonuses (gear, a
+buff) register a modifier under your system id — the profile folds it into the
+derived stats and recomputes:
+
+```js
+setModifier(ctx, player, 'inventory', { damage: 4, defense: 2 })
+clearModifier(ctx, player, 'inventory')
+```
+
+Need to carry your own data with the profile? Use your own key,
+`profile.ext.<yourId> = {...}`, then `markDirty(player)`.
+
+Client:
+
+```js
+import { myProfile, myStats, profileOf, onProfileChange } from './profile.js'
+```
+
+`snapshot.ext.profile` carries only the public part (`id, name, cls, level`).
+Gold, exp and attributes are private and pushed to their owner alone over
+`S2C.PROFILE_SELF` — do not republish them.
 
 ## Mobile is not optional
 
@@ -158,8 +201,8 @@ keyboard is an unfinished feature, so build both halves in the same pass.
 ```
 ┌──────────────────────────────────────────────┐
 │ stats                            debug   💬  │  top strip: HUD readouts
-│ chat log                                     │
-│                                              │
+│ chat log                                 🛒  │  utility column (top right)
+│                                          👤  │
 │                                              │
 │   ← stick zone (46% × 62%) →      [action]   │  bottom-left: movement
 │                                   [ rail  ]  │  bottom-right: actions
@@ -175,9 +218,17 @@ keyboard is an unfinished feature, so build both halves in the same pass.
    That is one keyboard binding plus one button in the action rail. Reserve
    `ctx.input.onKey` for things a phone genuinely cannot do.
 
-2. **Never place UI over `#stick-zone` or `#actions`.** The bottom-left
-   quadrant and the bottom-right corner are reserved. Panels go top-left,
-   top-right, or centred as a modal.
+   Pick the slot by *when* the button is pressed. Things used mid-fight stay
+   on the thumb rail; panels and toggles go to the utility column, so the rail
+   does not fill up with things nobody presses under pressure:
+
+   ```js
+   ctx.action({ id: 'shop', label: '🛒', key: 'KeyB', slot: 'utility', onPress: ... })
+   ```
+
+2. **Never place UI over `#stick-zone`, `#actions` or `#actions-utility`.**
+   The bottom-left quadrant, the bottom-right corner and the top-right column
+   are reserved. Panels go top-left, or centred as a modal.
 
 3. **Anchor to the safe-area variables**, not to raw pixels — notches and
    rounded corners eat the edges:

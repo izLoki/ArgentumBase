@@ -40,7 +40,7 @@ let profile = null
 let lastError = null
 
 a.on('connect', () => a.emit(C2S.JOIN, { name: 'Alice', cls: 'warrior' }))
-b.on('connect', () => b.emit(C2S.JOIN, { name: 'Bob', cls: 'mage' }))
+b.on('connect', () => b.emit(C2S.JOIN, { name: 'Bob', cls: 'hunter' }))
 
 a.on(S2C.WELCOME, (w) => { welcome = w })
 a.on(S2C.SNAPSHOT, (s) => { snapshot = s })
@@ -89,18 +89,34 @@ check('derived stats present', typeof profile?.stats?.maxHp === 'number', JSON.s
 check('player vitals follow the profile', selfOf().maxHp === profile?.stats?.maxHp,
   `${selfOf().maxHp} vs ${profile?.stats?.maxHp}`)
 
-const beforeSpend = { con: profile.profile.attributes.con, maxHp: profile.stats.maxHp }
+// --- arena foundation: no mana, intelligence lands on spellPower and cdr ---
+check('mana is gone from the derived stats', profile?.stats?.maxMana === undefined,
+  JSON.stringify(profile?.stats))
+check('spellPower derived', typeof profile?.stats?.spellPower === 'number',
+  `spellPower=${profile?.stats?.spellPower}`)
+check('cdr derived and capped', profile?.stats?.cdr >= 0 && profile?.stats?.cdr <= 45,
+  `cdr=${profile?.stats?.cdr}`)
+
+// Attributes now follow the class curve, so nobody has points to spend.
+check('no attribute points to spend', profile?.profile?.points === 0,
+  `points=${profile?.profile?.points}`)
+
+lastError = null
 a.emit(C2S.PROFILE_SPEND_POINT, { attr: 'con' })
 await wait(250)
-check('attribute point spent', profile.profile.attributes.con === beforeSpend.con + 1,
-  `con=${profile.profile.attributes.con}`)
-check('stats recomputed after spending', profile.stats.maxHp > beforeSpend.maxHp,
-  `${beforeSpend.maxHp} -> ${profile.stats.maxHp}`)
+check('manual point spending refused', lastError?.code === 'BAD_PAYLOAD', JSON.stringify(lastError))
 
 lastError = null
 a.emit(C2S.PROFILE_SPEND_POINT, { attr: 'nonsense' })
 await wait(200)
 check('unknown attribute rejected', lastError?.code === 'BAD_PAYLOAD', JSON.stringify(lastError))
+
+// --- the six arena systems exist and are all still disabled ---
+const arenaSystems = ['combat', 'effects', 'spells', 'npc', 'inventory', 'loot']
+const declared = arenaSystems.filter((id) => id in (welcome?.systems ?? {}))
+check('six arena systems declared', declared.length === 6, declared.join(','))
+check('arena systems still disabled', arenaSystems.every((id) => welcome?.systems?.[id] === false),
+  JSON.stringify(welcome?.systems))
 
 b.close()
 await wait(400)

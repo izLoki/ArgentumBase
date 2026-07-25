@@ -6,7 +6,7 @@
   --muted: #8b93a4;
   --accent: #d9b14f;
   --hp: #c0392b;
-  --mp: #2c6fbb;
+  --xp: #b8912f; /* there is no mana: the second bar is experience */
 
   /* Notches and rounded corners. Anchor every HUD element to these. */
   --safe-t: env(safe-area-inset-top, 0px);
@@ -151,7 +151,7 @@ body.touch select {
 }
 .bar .fill { position: absolute; inset: 0; width: 100%; transform-origin: left; }
 .fill.hp { background: var(--hp); }
-.fill.mp { background: var(--mp); }
+.fill.xp { background: var(--xp); }
 .bar b {
   position: relative;
   display: block;
@@ -341,6 +341,27 @@ body.touch #chat-toggle {
   font-weight: 600;
 }
 .action-btn.down { background: var(--accent); color: #1a1509; }
+
+/* ---------- Utility column ----------
+   Top right, under the chat toggle. Panels and toggles live here so the thumb
+   rail stays free for things used mid-fight. Built by ui/touch.js. */
+#actions-utility {
+  position: absolute;
+  right: calc(10px + var(--safe-r));
+  top: calc(86px + var(--safe-t));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 12;
+}
+
+.action-btn.utility {
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
+  background: rgba(18, 20, 26, 0.7);
+}
 
 /* ---------- Portrait guard ---------- */
 #rotate { display: none; }

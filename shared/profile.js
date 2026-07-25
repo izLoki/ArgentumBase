@@ -20,26 +20,65 @@ export const ATTRIBUTE_LABELS = {
   con: 'Constitution',
 }
 
-/** Derived stat keys. A modifier may only touch these. */
-export const STAT_KEYS = ['maxHp', 'maxMana', 'damage', 'defense', 'evasion']
+/**
+ * Derived stat keys. A modifier may only touch these.
+ *
+ * There is no mana: cooldown is the only limit on spells, so intelligence
+ * lands on `spellPower` and `cdr` instead. Both are integer percentages —
+ * `deriveStats` rounds every key, so fractional stats do not survive.
+ */
+export const STAT_KEYS = ['maxHp', 'damage', 'defense', 'evasion', 'spellPower', 'cdr']
 
 export const STAT_LABELS = {
   maxHp: 'Max HP',
-  maxMana: 'Max mana',
   damage: 'Damage',
   defense: 'Defense',
   evasion: 'Evasion',
+  spellPower: 'Spell power',
+  cdr: 'Cooldown red.',
 }
+
+/** Cooldown reduction ceiling, in percent. Clamped again at the use site. */
+export const CDR_MAX = 45
 
 /** Starting attributes per class. */
 export const BASE_ATTRIBUTES = {
   warrior: { str: 12, agi: 7, int: 4, con: 12 },
   mage: { str: 4, agi: 8, int: 14, con: 6 },
-  archer: { str: 8, agi: 14, int: 6, con: 8 },
+  hunter: { str: 8, agi: 14, int: 6, con: 8 },
 }
 
-export const LEVEL_MAX = 50
-export const POINTS_PER_LEVEL = 3
+/**
+ * Attributes grow only on level up, toward a fixed per-class target reached
+ * at `MAX_LEVEL` — the same cap for every class. There is no manual point
+ * spending, which is why `POINTS_PER_LEVEL` is zero.
+ */
+export const MAX_LEVEL = 20
+
+/** Total attribute points gained between level 1 and `MAX_LEVEL`, per class. */
+export const GROWTH_TOTAL = {
+  warrior: { str: 38, agi: 19, int: 0, con: 38 },
+  mage: { str: 0, agi: 19, int: 57, con: 19 },
+  hunter: { str: 19, agi: 57, int: 19, con: 19 },
+}
+
+export const POINTS_PER_LEVEL = 0
+
+/**
+ * The class's attributes at `level`, linearly interpolated between
+ * `BASE_ATTRIBUTES` at level 1 and `BASE_ATTRIBUTES + GROWTH_TOTAL` at
+ * `MAX_LEVEL`. Recomputing from `level` rather than accumulating a per-level
+ * delta guarantees the total lands exactly on target with no rounding drift.
+ */
+export function attributesAtLevel(cls, level) {
+  const base = BASE_ATTRIBUTES[cls] ?? BASE_ATTRIBUTES.warrior
+  const total = GROWTH_TOTAL[cls] ?? {}
+  const t = (Math.min(level, MAX_LEVEL) - 1) / (MAX_LEVEL - 1)
+
+  const out = {}
+  for (const attr of ATTRIBUTES) out[attr] = base[attr] + Math.round((total[attr] ?? 0) * t)
+  return out
+}
 
 /** Experience needed to go from `level` to `level + 1`. */
 export function expForLevel(level) {
@@ -94,10 +133,11 @@ export function deriveStats(profile, modifiers = []) {
 
   const stats = {
     maxHp: 40 + level * 6 + a.con * 4,
-    maxMana: 10 + level * 4 + a.int * 5,
     damage: 2 + Math.floor(level / 2) + Math.floor(a.str * 0.8),
     defense: Math.floor(a.con * 0.4) + Math.floor(a.agi * 0.2),
     evasion: Math.floor(a.agi * 0.6),
+    spellPower: 100 + a.int * 4, // 100 = neutral
+    cdr: Math.min(CDR_MAX, a.int * 1.2), // percent
   }
 
   for (const mod of modifiers) {

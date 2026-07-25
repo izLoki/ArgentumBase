@@ -65,3 +65,54 @@ declared in `C2S` and routes it to whichever system owns it.
 The server replies with `core:error` carrying `{ code, message }`. Codes are
 in `ERROR_CODE`. `NOT_IMPLEMENTED` means the owning system is currently
 disabled — expected while a feature is being built, not a bug.
+
+## Continuous state vs one-shots
+
+The choice between a snapshot field and an event is not a matter of taste:
+
+| Put it in `snapshot.ext.<id>` | Send it as an event |
+|---|---|
+| Anything that persists across ticks: mobs, projectiles in flight, ground drops, public status icons, the scoreboard | Anything instantaneous: a hit, a death, a pickup, an explosion |
+| | Anything private: a spellbook, a cooldown, gear tiers, gold |
+
+Snapshots are full state, so a client that missed one self-heals on the next.
+An event that is missed is gone — which is fine for a flash of light and fatal
+for a projectile's position. And because snapshots are **broadcast to
+everyone**, private data must never ride them; use `ctx.sendTo(player.id, ...)`.
+
+## The arena blocks
+
+These are declared in `shared/protocol.js` and owned by the system they are
+named after. The system that owns a block is the only one that adds to it.
+
+**C2S** — intents only.
+
+| Event | Owner | Payload |
+|---|---|---|
+| `combat:attack` | combat | `{}` melee in the facing direction |
+| `combat:respawn` | combat | `{}` early respawn once the timer allows |
+| `spells:cast` | spells | `{ id, tx?, ty?, dir? }` — which fields matter depends on the spell's `targeting` |
+| `inventory:buy` | inventory | `{ slot }` buys the next tier of that slot only |
+
+**S2C** — outcomes. `owner only` means it goes out with `ctx.sendTo`.
+
+| Event | Owner | Payload |
+|---|---|---|
+| `combat:hit` | combat | `{ x, y, kind, id, amount, crit, school, byId }` |
+| `combat:death` | combat | `{ kind, id, name, killerId, killerName }` |
+| `combat:respawned` | combat | `{ id, x, y, protectedMs }` |
+| `combat:killfeed` | combat | `{ killerName, victimName, victimKind, reward }` |
+| `effects:self` | effects | owner only — `{ active: [{ id, endsAt, stacks }] }` |
+| `spells:book` | spells | owner only — `{ known: [{ id, slot, unlocked }] }` |
+| `spells:cooldown` | spells | owner only — `{ id, untilMs }` |
+| `spells:castFx` | spells | `{ casterKind, casterId, id, x0, y0, tx, ty, dir, projId? }` |
+| `spells:ray` | spells | `{ id, x0, y0, x1, y1 }` |
+| `spells:impact` | spells | `{ id, x, y, radius }` |
+| `spells:failed` | spells | owner only — `{ id, reason }` |
+| `inventory:self` | inventory | owner only — `{ tiers, nextCosts }` |
+| `loot:picked` | loot | `{ id, byId, type }` |
+| `loot:explode` | loot | `{ id, x, y, radius }` |
+
+One melee attack must produce exactly **one** `combat:hit`. If you see two,
+something other than `combat` wrote `hp` — see the ownership block at the top
+of `server/systems/combat.js`.

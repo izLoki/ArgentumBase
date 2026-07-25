@@ -27,8 +27,6 @@ export const world = {
  * @property {number} dir
  * @property {number} hp
  * @property {number} maxHp
- * @property {number} mana
- * @property {number} maxMana
  * @property {boolean} dead
  * @property {number} lastMoveAt
  * @property {Object} ext  per-system scratch space
@@ -37,12 +35,36 @@ export const world = {
 /** @type {Array<(x:number,y:number,exceptId:string|null)=>boolean>} */
 const blockers = []
 
+/** @type {Array<(player:Player)=>boolean>} */
+const moveGates = []
+
 /**
  * Lets a system declare that its entities occupy tiles, without touching the
  * core. Call it from your `init(ctx)`.
  */
 export function registerBlocker(fn) {
   blockers.push(fn)
+}
+
+/**
+ * Lets a system veto a player's step — `rooted`, `stunned`, frozen in place.
+ * Return `false` to block. Call it from your `init(ctx)`:
+ *
+ *   registerMoveGate((player) => !hasFlag(player, 'rooted'))
+ *
+ * Facing is deliberately not gated: turning stays free so a rooted player can
+ * still aim.
+ */
+export function registerMoveGate(fn) {
+  moveGates.push(fn)
+}
+
+/** True when every registered gate allows this player to step. */
+export function canMove(player) {
+  for (const fn of moveGates) {
+    if (fn(player) === false) return false
+  }
+  return true
 }
 
 export function isTileOccupied(x, y, exceptId = null) {
@@ -70,8 +92,6 @@ export function createPlayer(id, name, cls) {
     dir: DIR.DOWN,
     hp: PLAYER_DEFAULTS.hp,
     maxHp: PLAYER_DEFAULTS.maxHp,
-    mana: PLAYER_DEFAULTS.mana,
-    maxMana: PLAYER_DEFAULTS.maxMana,
     dead: false,
     lastMoveAt: 0,
     ext: Object.create(null),

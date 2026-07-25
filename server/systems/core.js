@@ -8,7 +8,7 @@
 import { C2S, S2C, ERROR_CODE } from '../../shared/protocol.js'
 import { DIR_VEC, MOVE_COOLDOWN_MS } from '../../shared/constants.js'
 import { isWalkable } from '../world/map.js'
-import { isTileOccupied } from '../game/state.js'
+import { canMove, isTileOccupied } from '../game/state.js'
 
 function isValidDir(dir) {
   return dir === 0 || dir === 1 || dir === 2 || dir === 3
@@ -33,6 +33,10 @@ export default {
 
       // Turning is always free; walking is rate limited.
       player.dir = dir
+
+      // Effects (rooted, stunned) veto the step through this hook, so no
+      // system has to reach into the core to freeze someone in place.
+      if (!canMove(player)) return
 
       const now = Date.now()
       if (now - player.lastMoveAt < MOVE_COOLDOWN_MS) return

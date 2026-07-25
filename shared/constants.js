@@ -53,18 +53,22 @@ export const DIR_VEC = {
 /** Movement cooldown (ms). Enforced by the server — never trust the client. */
 export const MOVE_COOLDOWN_MS = 140
 
+/**
+ * Only used for the instant between `createPlayer` and the profile's first
+ * `recompute`, which immediately replaces maxHp with the derived value.
+ *
+ * There is no mana in this world: cooldown is the only limit on spells.
+ */
 export const PLAYER_DEFAULTS = {
   maxHp: 100,
   hp: 100,
-  maxMana: 50,
-  mana: 50,
 }
 
-/** Playable classes. Purely cosmetic for now. */
+/** Playable classes. Drives colour, base attributes and the spell set. */
 export const CLASSES = {
   warrior: { label: 'Warrior', color: 0xd94f4f },
   mage: { label: 'Mage', color: 0x4f7fd9 },
-  archer: { label: 'Archer', color: 0x4fd97f },
+  hunter: { label: 'Hunter', color: 0x4fd97f },
 }
 
 export const CHAT_MAX_LEN = 120
