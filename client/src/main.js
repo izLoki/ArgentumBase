@@ -33,6 +33,8 @@ let app = null
 let layers = null
 /** Context handed to every client system. Filled in once the stage is ready. */
 let ctx = null
+/** Guards the one-time bootstrap: WELCOME arrives again on every reconnect. */
+let worldStarted = false
 
 const stageReady = createStage(document.getElementById('game'))
   .then((stage) => {
@@ -79,6 +81,16 @@ function connect(name, cls) {
 
     loginEl.classList.add('hidden')
     drawTilemap(layers.ground, welcome.map)
+
+    // Everything below binds listeners or timers exactly once. A reconnect
+    // delivers a fresh WELCOME with a new player id, and re-running this
+    // would duplicate input handlers, chat handlers and the frame loop.
+    if (worldStarted) {
+      chat.log('Reconnected.', 'system')
+      return
+    }
+    worldStarted = true
+
     hud.mount()
     chat.mount()
     input.start()
