@@ -350,9 +350,29 @@ export const UNLOCK_LEVELS = [1, 1, 1, 8, 14]
 /** Every targeting shape the executor must handle. Keeps the registry honest. */
 export const TARGETING = ['melee', 'self', 'tile', 'ray', 'aoe', 'projectile', 'dash']
 
+/**
+ * Stable id order, so the snapshot can send a small integer instead of a
+ * string. Projectiles are the densest thing in `snapshot.ext.spells` and they
+ * all carry a spell id — at 15 Hz the difference is worth the indirection.
+ *
+ * Append-only: a row inserted in the middle would renumber every id and a
+ * client mid-flight would draw the wrong spell for one snapshot.
+ */
+export const SPELL_IDS = Object.keys(SPELLS)
+
 /** The definition, or null for an unknown id. Never throws on bad input. */
 export function spellDef(id) {
   return SPELLS[id] ?? null
+}
+
+/** Wire index of a spell id, or -1. */
+export function spellIndex(id) {
+  return SPELL_IDS.indexOf(id)
+}
+
+/** The id behind a wire index, or null. */
+export function spellFromIndex(index) {
+  return SPELL_IDS[index] ?? null
 }
 
 /** The five class spells, in slot order. Does not include the attack. */

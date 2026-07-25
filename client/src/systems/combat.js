@@ -21,7 +21,14 @@ export default {
   id: 'combat',
 
   init(ctx) {
-    // A5: own Container in ctx.layers.fx, plus the attack action.
+    // A5: own Container in ctx.layers.fx.
+    //
+    // The attack is `SPELLS.attack`, slot 0 of the rail, and `spells` owns the
+    // whole rail once it is live — binding it here too would put two ⚔ buttons
+    // on a phone and run two independent cooldowns. This binding is the
+    // fallback for a world running combat without spells.
+    if (ctx.state.systems.spells) return
+
     ctx.action({
       id: 'attack',
       label: '⚔',

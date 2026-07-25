@@ -63,6 +63,12 @@ export default {
 /**
  * Applies (or refreshes) a timed effect.
  *
+ * `opts.params` is the whole point of the definition/instance split (ARENA.md
+ * §3.3): the TABLE declares what `burning` is, the CALLER says how hard this
+ * particular burn hurts. Without it every burn in the game would be identical
+ * and two spells could not burn at different rates. Pass it straight to
+ * `resolveParams(effectId, opts.params, casterStats)` from shared/effects.js.
+ *
  * @param {Object} ctx
  * @param {Object} target          a player, or a target handle from combat
  * @param {string} effectId        a key of EFFECTS in shared/effects.js
@@ -70,6 +76,10 @@ export default {
  * @param {Object} [opts]
  * @param {string} [opts.sourceId] who applied it, for attribution
  * @param {number} [opts.stacks]
+ * @param {Object|Function} [opts.params]  magnitude overrides, merged over the
+ *   effect's `defaults`. A function receives the caster's stats, which is what
+ *   lets a DoT scale with intelligence at the moment it lands.
+ * @param {Object} [opts.casterStats]      passed to `opts.params` when it is a function
  * @returns {boolean} false when the id is unknown or the target cannot hold effects
  */
 export function applyEffect(ctx, target, effectId, durationMs, opts = {}) {
