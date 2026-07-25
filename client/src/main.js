@@ -17,11 +17,16 @@ import { drawTilemap } from './render/tilemap.js'
 import { syncEntities } from './render/entities.js'
 import { updateCamera } from './render/camera.js'
 import { input } from './input.js'
+import { viewport } from './viewport.js'
 import { hud } from './ui/hud.js'
 import { chat } from './ui/chat.js'
+import { touch, action } from './ui/touch.js'
 import { initSystems, invokeClient } from './systems/index.js'
 
 const PING_INTERVAL_MS = 2000
+
+// Device class and the sizing CSS variables must exist before anything paints.
+viewport.mount()
 
 const loginEl = document.getElementById('login')
 const formEl = document.getElementById('login-form')
@@ -40,7 +45,7 @@ const stageReady = createStage(document.getElementById('game'))
   .then((stage) => {
     app = stage.app
     layers = stage.layers
-    ctx = { app, layers, state, net, chat, hud, input, self }
+    ctx = { app, layers, state, net, chat, hud, input, self, viewport, touch, action }
     return stage
   })
   .catch((err) => {
@@ -52,6 +57,8 @@ formEl.addEventListener('submit', (e) => {
   e.preventDefault() // never let the browser navigate away
   clearError()
   submitEl.disabled = true
+  // Fullscreen and the orientation lock are only granted inside a gesture.
+  viewport.requestLandscape()
   connect(
     document.getElementById('login-name').value.trim(),
     document.getElementById('login-class').value,
@@ -94,9 +101,15 @@ function connect(name, cls) {
     hud.mount()
     chat.mount()
     input.start()
+    touch.mount() // before the systems, so their action buttons find the rail
     initSystems(ctx)
 
-    chat.log('WASD to move · Enter to chat.', 'system')
+    chat.log(
+      viewport.isTouch
+        ? 'Drag the left side of the screen to move · 💬 to talk.'
+        : 'WASD to move · Enter to chat.',
+      'system',
+    )
 
     startPing()
     app.ticker.add(onFrame)

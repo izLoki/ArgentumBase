@@ -2,7 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0e0f12" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Argentum — multiplayer world</title>
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
@@ -28,7 +35,7 @@
         </label>
         <button type="submit">Enter the world</button>
         <p id="login-error" class="error hidden"></p>
-        <p class="hint">WASD or arrow keys to move · Enter to chat</p>
+        <p class="hint">WASD, arrows or the on-screen stick to move · Enter to chat</p>
       </form>
     </div>
 
@@ -46,6 +53,27 @@
       </div>
 
       <div id="debug" class="debug"></div>
+
+      <!--
+        Touch controls, mounted by client/src/ui/touch.js on touch devices.
+        #stick-zone and #actions are reserved screen space: never place a panel
+        of your own over them.
+      -->
+      <div id="touch" class="hidden">
+        <div id="stick-zone">
+          <div id="stick" class="hidden"><span id="stick-knob"></span></div>
+        </div>
+        <div id="actions"></div>
+      </div>
+    </div>
+
+    <!-- Shown on touch devices held in portrait; the world is landscape only. -->
+    <div id="rotate">
+      <div>
+        <span class="rotate-icon">📱</span>
+        <p class="rotate-title">Rotate your device</p>
+        <p class="muted">Argentum is played in landscape.</p>
+      </div>
     </div>
 
     <script type="module" src="./src/main.js"></script>

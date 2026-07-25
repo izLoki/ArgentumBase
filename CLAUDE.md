@@ -88,7 +88,14 @@ export default {
 
   init(ctx) {
     // Runs when the world is ready, only if the server system is enabled.
-    ctx.input.onKey('ControlLeft', () => ctx.net.send(C2S.ATTACK, {}))
+    // `action` binds a key and an on-screen button in one call, so the
+    // feature works on a phone too. See "Mobile is not optional" below.
+    ctx.action({
+      id: 'attack',
+      label: '⚔',
+      key: 'ControlLeft',
+      onPress: () => ctx.net.send(C2S.ATTACK, {}),
+    })
   },
 
   onSnapshot(ctx, snapshot) {},
@@ -135,8 +142,69 @@ Client (built in `client/src/main.js`):
 | `ctx.app`, `ctx.layers` | Pixi application and draw layers |
 | `ctx.state`, `ctx.self()` | local mirror of the world |
 | `ctx.net` | `send` / `on` |
-| `ctx.input.onKey(code, fn)` | bind a key without touching `input.js` |
+| `ctx.action({id, label, key, onPress})` | one binding, keyboard **and** thumb button |
+| `ctx.input.onKey(code, fn)` | keyboard-only binding (desktop-only features) |
+| `ctx.viewport` | `isTouch`, `isMobile`, `isPortrait`, `zoom`, `onChange(fn)` |
+| `ctx.touch` | `addButton` / `removeButton` when `action()` is not enough |
 | `ctx.hud`, `ctx.chat` | HUD updates and message output |
+
+## Mobile is not optional
+
+The world is played on phones in landscape. A feature that only works with a
+keyboard is an unfinished feature, so build both halves in the same pass.
+
+**Screen budget on a phone in landscape (~740×380 CSS px):**
+
+```
+┌──────────────────────────────────────────────┐
+│ stats                            debug   💬  │  top strip: HUD readouts
+│ chat log                                     │
+│                                              │
+│                                              │
+│   ← stick zone (46% × 62%) →      [action]   │  bottom-left: movement
+│                                   [ rail  ]  │  bottom-right: actions
+└──────────────────────────────────────────────┘
+```
+
+1. **Bind actions with `ctx.action`, never `ctx.input.onKey` alone.**
+
+   ```js
+   ctx.action({ id: 'attack', label: '⚔', key: 'ControlLeft', onPress: () => ... })
+   ```
+
+   That is one keyboard binding plus one button in the action rail. Reserve
+   `ctx.input.onKey` for things a phone genuinely cannot do.
+
+2. **Never place UI over `#stick-zone` or `#actions`.** The bottom-left
+   quadrant and the bottom-right corner are reserved. Panels go top-left,
+   top-right, or centred as a modal.
+
+3. **Anchor to the safe-area variables**, not to raw pixels — notches and
+   rounded corners eat the edges:
+
+   ```css
+   top: calc(12px + var(--safe-t));
+   left: calc(12px + var(--safe-l));
+   ```
+
+4. **Anything anchored to the bottom adds `var(--kb)`.** That is the soft
+   keyboard's overlap, kept up to date by `client/src/viewport.js`. Without it
+   the element sits under the keyboard while the player types.
+
+5. **Size panels in `%` / `min()`, with a `max-height`.** A fixed 400×500 panel
+   does not fit. Assume 380px of height, minus the top strip.
+
+6. **Tap targets are at least 44×44 px**, and `font-size: 16px` on any input —
+   below that iOS Safari zooms the page on focus.
+
+7. **Do not read `window.innerWidth` yourself.** `ctx.viewport.isMobile` is the
+   single answer, and `ctx.viewport.onChange(fn)` fires on rotation and resize.
+
+8. **World scale belongs to the camera.** `ctx.viewport.zoom` is applied once,
+   to `layers.camera`; systems keep working in plain world pixels.
+
+Test the mobile layout on a desktop with `?touch=1` — it forces the touch HUD
+without a device.
 
 ## Rules that keep merges clean
 
@@ -147,10 +215,11 @@ Client (built in `client/src/main.js`):
    `collectSnapshot()` and read it from `snapshot.ext.<yourId>`.
 3. **Private data does not go in the snapshot.** Snapshots are broadcast to
    everyone; use `ctx.sendTo(player.id, ...)` for per-player data.
-4. **Bind keys from your own module** with `ctx.input.onKey`, not by editing
+4. **Bind actions from your own module** with `ctx.action`, not by editing
    `input.js`.
 5. **Build UI panels from your own module** by creating the elements in JS,
-   rather than editing `client/index.html`.
+   rather than editing `client/index.html`. Keep them inside the mobile screen
+   budget — see "Mobile is not optional".
 6. **`enabled: false` is the safety switch.** While a system is off, its
    events answer `NOT_IMPLEMENTED` and nothing else runs. Half-finished work
    can be merged without breaking the world.

@@ -1,9 +1,11 @@
 /**
- * Keyboard input -> network intents.
+ * Input -> network intents. Keyboard on desktop, virtual stick on touch.
  *
- * The core only binds movement and chat. Any other key belongs to a system:
- * call `input.onKey('KeyQ', fn)` from your own module instead of editing this
- * file, so keybindings never cause merge conflicts.
+ * The core only binds movement and chat. Any other key belongs to a system,
+ * and a system should bind it through `ctx.action(...)` (see ui/touch.js) so
+ * it also gets a thumb button on mobile. `input.onKey('KeyQ', fn)` remains the
+ * keyboard-only escape hatch. Either way, never edit this file to add a
+ * binding — that is what keeps keybindings out of merge conflicts.
  */
 
 import { C2S } from '@shared/protocol.js'
@@ -27,13 +29,19 @@ const pressed = new Set()
 const customKeys = new Map()
 let lastMoveSentAt = 0
 let enabled = false
+/** Direction held by the on-screen stick, or null. Owned by ui/touch.js. */
+let virtualDir = null
 
 export const input = {
   start() {
     enabled = true
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
-    window.addEventListener('blur', () => pressed.clear())
+    window.addEventListener('blur', release)
+    // Backgrounding a phone browser never delivers keyup or pointerup.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) release()
+    })
   },
 
   /** Binds a key. `code` is a KeyboardEvent.code, e.g. 'KeyQ'. */
@@ -41,24 +49,42 @@ export const input = {
     customKeys.set(code, fn)
   },
 
+  /** Called by the on-screen stick. Pass null when the thumb lifts. */
+  setVirtualDir(dir) {
+    virtualDir = dir ?? null
+  },
+
   /** Called every frame: sends held-down movement. */
   update() {
-    if (!enabled || isTyping()) return
+    if (!enabled) return
     const now = performance.now()
     if (now - lastMoveSentAt < REPEAT_MS) return
 
-    for (const code of pressed) {
-      const dir = MOVE_KEYS[code]
-      if (dir === undefined) continue
-      net.send(C2S.MOVE, { dir })
-      lastMoveSentAt = now
-      return
-    }
+    const dir = virtualDir ?? heldDir()
+    if (dir === null) return
+
+    net.send(C2S.MOVE, { dir })
+    lastMoveSentAt = now
   },
 
   get pressed() {
     return pressed
   },
+}
+
+/** First held movement key, ignoring the keyboard entirely while typing. */
+function heldDir() {
+  if (isTyping()) return null
+  for (const code of pressed) {
+    const dir = MOVE_KEYS[code]
+    if (dir !== undefined) return dir
+  }
+  return null
+}
+
+function release() {
+  pressed.clear()
+  virtualDir = null
 }
 
 function isTyping() {

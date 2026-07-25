@@ -18,6 +18,10 @@ export async function createStage(mount) {
     resizeTo: window,
     antialias: false,
     roundPixels: true,
+    // Phones are high-DPI; without this the primitives look soft. Capped at 2
+    // because a 3x buffer costs more than it shows.
+    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    autoDensity: true,
   })
   mount.appendChild(app.canvas)
 
