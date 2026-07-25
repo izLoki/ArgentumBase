@@ -153,14 +153,18 @@ Flat XP and coins per victim, in `shared/rewards.js`:
 ```js
 export const XP_REWARD = {
   player: { warrior: 130, mage: 140, hunter: 135 },  // scaled by the victim's level
-  npc:    { wisp: 28, imp: 30, golem: 45, dragon: 80 },
+  npc:    { bat: 22, skeleton: 30, golem: 55, dragon: 95 },
 }
 export const COIN_REWARD = {
   player: { warrior: 45, mage: 45, hunter: 45 },
-  npc:    { wisp: 9, imp: 10, golem: 14, dragon: 26 },
+  npc:    { bat: 7, skeleton: 10, golem: 18, dragon: 34 },
 }
 export const REPEAT_KILL_WINDOW_MS = 45_000
 ```
+
+A bat is worth roughly a quarter of a dragon, which is about the ratio of
+effort: the dragon is the only monster that can actually kill a healthy
+player, and the bat is a mosquito that flees on contact.
 
 Anti-snowball levers (turn on at least two before the arena is playable):
 diminishing XP by killer level (`1 - lvl * 0.02`, floor `0.25`), decay for
@@ -338,6 +342,11 @@ export const EFFECTS = {
       tick:  { hp: +6 },
     },
   },
+  poisoned: {
+    name: 'Poisoned', icon: '🧪',
+    kind: 'dot', everyMs: 1000, stacking: 'strongest',
+    defaults: { tick: { hp: -3 } },
+  },
   marked: { name:'Marked', icon:'🎯', kind:'aura', stacking:'refresh',
             defaults: { taken: { all: +20 } } },
   rooted: { name:'Rooted', icon:'🪢', kind:'aura', stacking:'refresh',
@@ -346,6 +355,10 @@ export const EFFECTS = {
             defaults: { stats: { damage: +8 } } },
 }
 ```
+
+`poisoned` ticks once a second rather than twice like `burning`: it is the
+bat's whole contribution and it should read as a slow drain the victim has
+time to notice, not a burst.
 
 A spell overrides whatever it wants when it applies the effect:
 
@@ -574,16 +587,32 @@ gets exercised, which is what keeps the registry honest.
 
 ## 5. Monsters
 
+Four types, each with a different reason to exist: the golem is a wall, the
+dragon is the real threat, the skeleton is an obstacle, and the bat is a
+nuisance that never stays to fight.
+
 ```js
 const MOB_TYPES = {
-  golem:  { hp:220, attrs:{str:110, agi: 15, int: 10, con:120 }, stats:{damage:+6, defense:10},
-            moveMs:520, aggro: 7, spells:['stoneSlam'],             weight:3 },
-  dragon: { hp:260, attrs:{str: 60, agi: 45, int:120, con: 90 }, stats:{damage:+4, defense: 6},
-            moveMs:400, aggro:10, spells:['fireball','fireBreath'], weight:1 },
-  wisp:   { hp: 70, attrs:{str: 10, agi:100, int: 40, con: 20 }, stats:{damage:+1, defense: 2},
-            moveMs:240, aggro: 8, spells:['spark'],                 weight:4 },
-  imp:    { hp:110, attrs:{str: 25, agi: 50, int: 70, con: 35 }, stats:{damage:+2, defense: 3},
-            moveMs:320, aggro: 9, spells:['hex'],                   weight:3 },
+  dragon: {
+    hp: 280, attrs:{ str: 70, agi: 45, int:120, con:100 }, stats:{ damage:+4, defense: 6 },
+    moveMs: 400, aggro: 10, behaviour: 'brawler', weight: 1,
+    spells: ['fireBreath', 'tailSweep', 'clawSwipe'],
+  },
+  golem: {
+    hp: 240, attrs:{ str:130, agi: 10, int:  5, con:130 }, stats:{ damage:+6, defense:12 },
+    moveMs: 560, aggro:  6, behaviour: 'brawler', weight: 3,
+    spells: ['boulder', 'stoneFist'],
+  },
+  skeleton: {
+    hp:  80, attrs:{ str: 20, agi: 35, int: 45, con: 30 }, stats:{ damage: 0, defense: 3 },
+    moveMs: 340, aggro:  8, behaviour: 'brawler', weight: 4,
+    spells: ['chill'],
+  },
+  bat: {
+    hp:  45, attrs:{ str: 10, agi:120, int: 60, con: 15 }, stats:{ damage: 0, defense: 1 },
+    moveMs: 200, aggro:  9, behaviour: 'hitAndRun', weight: 4,
+    spells: ['venomBite'],
+  },
 }
 const MAX_MOBS = 24, SPAWN_INTERVAL_MS = 2500, MIN_SPAWN_DIST = 10
 ```
@@ -594,6 +623,58 @@ just another caster handle. Their `hp` is authored directly rather than
 derived, because a mob has no level curve to interpolate. `moveMs` is
 likewise authored rather than derived from `agi`: mob movement does not go
 through the player `MOVE` handler.
+
+### 5.1 Monster abilities
+
+They are ordinary rows in `shared/spells.js` with `cls: 'npc'`, which is the
+whole point of mobs casting through the same executor. Nothing here needs a
+new `targeting` shape or a new action.
+
+| Monster | Ability | Shape | Notes |
+|---|---|---|---|
+| **Dragon** | **Claw Swipe** | melee, range 1 | the filler. Short cooldown, `str`-scaling |
+| | **Tail Sweep** | aoe radius 1 on self | occasional. Hits everything around it and knocks it back — the one user of the `knockback` action |
+| | **Fire Breath** | ray range 4, width 3, pierce | the real threat. Long cooldown, `int`-scaling, leaves `burning` on everything in the cone |
+| **Golem** | **Stone Fist** | melee, range 1 | slow and very heavy, `str`-scaling |
+| | **Boulder** | projectile, slow, splash radius 1 | a lobbed rock. `str`-scaling, telegraphed by how slowly it travels |
+| **Skeleton** | **Chill** | tile, range 4 | its only ability: `rooted` for a moment and **1–2 damage**. See below |
+| **Bat** | **Venom Bite** | melee, range 1 | its only ability: applies `poisoned` and then the bat leaves |
+
+**The skeleton is meant to be an obstacle, not a threat.** `Chill` is authored
+with `base: 2, scaling: 0` — it ignores the caster's attributes entirely, so it
+deals the same trivial damage forever and cannot scale into relevance. The
+point is the root: it interrupts a chase, not a life bar. It is deliberately
+*not* zero, because `spellDamage` floors at 1 and a skeleton finishing off
+someone who was already nearly dead is a good story rather than a bug. Do not
+"fix" that by making it harmless.
+
+**The bat never fights.** `behaviour: 'hitAndRun'` is what makes it approach,
+apply `poisoned`, and immediately retreat for a few seconds before considering
+another pass. Its damage is entirely in the DoT, so a bat that is chased down
+and killed has already done its whole job.
+
+This adds one row to `shared/effects.js`:
+
+```js
+poisoned: { name:'Poisoned', icon:'🧪', kind:'dot', everyMs:1000,
+            stacking:'strongest', defaults:{ tick:{ hp:-3 } } },
+```
+
+### 5.2 AI
+
+**Ability choice is a data question, not a decision tree.** `spells` is in
+priority order and the mob casts **the first one that is off cooldown and
+whose range covers the target**. That is why the dragon lists
+`['fireBreath', 'tailSweep', 'clawSwipe']`: the long-cooldown abilities get
+first refusal and the claw is what is left over. Retuning a monster means
+reordering a list.
+
+**Behaviour** is one field with two values today:
+
+| `behaviour` | Movement |
+|---|---|
+| `brawler` | close on the nearest player inside `aggro` and stay there |
+| `hitAndRun` | close, cast, then retreat for `RETREAT_MS` before approaching again |
 
 **Tick budget at 15 Hz.** Every mob carries a `nextThinkAt` with a randomised
 200–400 ms think interval, so roughly 10–14 think per tick rather than all 24.
@@ -659,6 +740,7 @@ const DROP_TYPES = {
   ragePotion:  { icon:'⚗',  onPickup: (ctx,p) => applyEffect(ctx, p, 'rage', 8000) },
   swiftPotion: { icon:'🌀', onPickup: (ctx,p) => applyEffect(ctx, p, 'swift', 8000) },
   coins:       { icon:'🪙', onPickup: (ctx,p) => addGold(ctx, p, 25) },
+  xpOrb:       { icon:'🔹', onPickup: (ctx,p) => addExp(ctx, p, 35) },
   bomb:        { icon:'💣', fuseMs:3000, radius:2, damage:55 },  // arms on drop, never picked up
 }
 const DROP_TTL_MS = 45_000
@@ -669,9 +751,53 @@ inventory. The bomb is the exception: it arms where it lands and detonates on
 a timer, so it is an area-denial hazard rather than a pickup. That matches
 "explodes on a timer" and is more interesting than another consumable.
 
-Drops spawn from `combat.onKill` at the victim's tile, or the nearest free
-tile if it is occupied. Pickup runs in `loot.onTick` as one `byTile` lookup
-per player — O(players), not O(drops).
+Pickup runs in `loot.onTick` as one `byTile` lookup per player — O(players),
+not O(drops) — and asks the same body-overlap question every area effect asks,
+so a drop is collected by touching it rather than by centring on it.
+
+### 7.1 Two sources: kills and the world itself
+
+**Kill drops** spawn from `combat.onKill` at the victim's tile, or the nearest
+free tile if it is occupied.
+
+**World drops** appear on their own, so the map is worth walking around even
+when nothing is dying on it. That is the difference between an arena and a
+lobby: a player with nothing to fight still has somewhere to go.
+
+```js
+const WORLD_SPAWN_INTERVAL_MS = 12_000
+const MAX_WORLD_DROPS = 18
+const WORLD_MIN_PLAYER_DIST = 6      // blocks
+const WORLD_DROP_TTL_MS = 120_000    // outlive a kill drop: nobody saw them land
+
+const WORLD_SPAWN_TABLE = [
+  ['coins', 40],
+  ['healPotion', 25],
+  ['xpOrb', 20],
+  ['ragePotion', 8],
+  ['swiftPotion', 7],
+]
+```
+
+Rules that keep it from being annoying rather than generous:
+
+- **Never a bomb.** Every other type is a reward; a bomb that materialises
+  under someone with no one to blame is just a random death. Bombs stay a
+  kill drop, where the player who died put it there.
+- **Never within `WORLD_MIN_PLAYER_DIST` of a player.** A reward that appears
+  on top of you is not a reward, it is a lottery — and it makes standing still
+  the optimal strategy.
+- **Placed with `ctx.findFreeTile`**, so a drop never lands inside a wall or
+  the lake. The map is mostly open, so a single random pick plus that helper
+  is enough; no rejection loop.
+- **Capped at `MAX_WORLD_DROPS`.** Without a cap an empty server accumulates
+  drops for hours and the first player to join sweeps a fortune off the floor.
+- **Longer TTL than a kill drop.** A kill drop is contested loot with a clock
+  on it. A world drop had no audience, so it waits.
+
+`xpOrb` is the only genuinely new type: it grants experience through
+`profile.addExp`, which already handles levelling, announcing and the spell
+unlock that follows. Nothing about progression needs to know it exists.
 
 ---
 

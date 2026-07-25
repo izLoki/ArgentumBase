@@ -47,7 +47,7 @@ P1  combat · effects · loot · HUD        P2  spells · npc · inventory
 | Server | `combat.js`, `effects.js`, `loot.js` | `spells.js`, `npc.js`, `inventory.js` |
 | Client | the same three, plus `ui/hud.js` | the same three |
 | Shared | `rewards.js`, `effects.js` | `spells.js`, `gear.js` |
-| Tasks | A1–A5, C4, C5, C6 | B1–B5, C1–C3 |
+| Tasks | A1–A5, C4–C7 | B1–B5, C1–C3 |
 
 `loot` stays with P1 because everything it calls — `onKill`, `heal`,
 `applyEffect` — is P1's. Mob drops come from `loot`'s own `onKill` listener,
@@ -61,8 +61,8 @@ Both start on day one; neither is ever blocked.
 |---|---|---|
 | 1 | **A3 — `combat` server.** The unblocker: providers, pipeline, melee, death, respawn. Enable it as soon as a hit lands | **C2 + C3 — `inventory`.** Needs only `profile`, which is already live, so it is testable end to end on day one |
 | 2 | A1 `effects` server — the definition/instance split (§3.3) and the four stacking policies are the whole task | B2 — `spells` server executor, against a real `combat` |
-| 3 | A4 kill rewards and feed, A2 `effects` client | B3 `spells` client, then B4 `npc` server |
-| 4 | A5 `combat` client, C4 + C5 `loot`, C6 HUD readouts | B5 `npc` client |
+| 3 | A4 kill rewards and feed, A2 `effects` client | B3 `spells` client, then B4a + B4b `npc` |
+| 4 | A5 `combat` client, C4–C6 `loot` and the world spawner, C7 HUD readouts | B4c AI, B5 `npc` client |
 
 P2's sprint 1 is deliberately the one piece of Lane C that touches nothing of
 P1's — it buys P1 the day it needs to land `combat` without anyone idling.
@@ -81,13 +81,17 @@ P1's — it buys P1 the day it needs to land `combat` without anyone idling.
    shape from `combat`, that is a conversation, not a commit — every no-op in
    M0 is a promise P2 already built against.
 
-### Known gap for P2
+### The one cross-lane row
 
-`MOB_TYPES` in `server/systems/npc.js` references `stoneSlam`, `fireBreath`,
-`spark` and `hex`, which do not exist in `shared/spells.js` — `ARENA.md` never
-specified them. Defining them is the first half of B4. They are ordinary rows
-with `cls: 'npc'`, which is the whole point of mobs casting through the same
-executor.
+The bat needs `poisoned` in `shared/effects.js`, which is P1's file. It is an
+append-only row in a table (`ARENA.md` §3.3) rather than a change to anything,
+so whoever gets there first adds it — but it is the single place the two lanes
+touch the same file, and it is worth saying out loud instead of discovering it
+in a merge.
+
+`shared/spells.js` needs the seven monster abilities of `ARENA.md` §5.1. They
+are ordinary rows with `cls: 'npc'` in P2's own file, which is the whole point
+of mobs casting through the same executor.
 
 ### Why M0 has to land first
 
@@ -160,8 +164,10 @@ and their client halves.
 | **B1** | `shared/spells.js` in full: the melee slot 0 plus all fifteen definitions from `ARENA.md` §4.6, each with its `base` / `attr` / `scaling` triple (§4.2), plus `effectiveCooldown` and `spellDamage` | M0 | **done** |
 | **B2** | `spells` server: the executor, the `ACTIONS` registry, all seven targeting shapes, cooldowns from `cdr`, level-gated unlocks, the private spellbook | B1, A3 signature | **done** |
 | **B3** | `spells` client: six rail buttons, cooldown sweeps, auto-target plus long-press aiming, projectile / ray / impact rendering in `layers.fx` | B2 | **done** |
-| **B4** | `npc` server: the mob table, spawner, AI, `registerBlocker` and `registerTargetProvider`, casting through B2's executor, drops through `loot.spawnDrop` | B2, A3 signature | |
-| **B5** | `npc` client: mob rendering with health bars in `layers.entities`, and `mobViewPosition` for other systems to anchor FX | B4 | |
+| **B4a** | The seven monster abilities of `ARENA.md` §5.1 as `cls: 'npc'` rows in `shared/spells.js`, plus the `poisoned` row in `shared/effects.js` | B2 | |
+| **B4b** | `npc` server: the four-monster table, spawner, `registerBlocker` and `registerTargetProvider`, casting through B2's executor, drops through `loot.spawnDrop` | B4a, A3 | |
+| **B4c** | `npc` AI: first-off-cooldown-in-range ability choice, plus the two `behaviour` values — `brawler` and the bat's `hitAndRun` | B4b | |
+| **B5** | `npc` client: mob rendering with health bars in `layers.entities`, and `mobViewPosition` for other systems to anchor FX | B4b | |
 
 Two contract notes came out of B2, both worth knowing before A1 and B4:
 
@@ -175,7 +181,7 @@ Two contract notes came out of B2, both worth knowing before A1 and B4:
   wraps it in `bodiesInRadius`, inflating by `PLAYER_RADIUS`. Anything else
   asking "did someone touch this" wants the same wrapper.
 
-B4 depends on B2 because mobs cast through the same executor. Inside the lane
+B4b depends on B2 because mobs cast through the same executor. Inside the lane
 that is sequential; across lanes it blocks nobody.
 
 **Watch out for:** projectiles belong in the snapshot, not only in one-shot
@@ -195,10 +201,11 @@ and their client halves.
 | **C2** | `inventory` server: buy by slot, next-tier-only validation, atomic `spendGold`, one `setModifier`, and the damage pipeline stage that reads the non-stat `mult` fields | C1, A3 signature |
 | **C3** | `inventory` client: the shop modal inside the mobile budget, the 🛒 button in the utility column, digit keys 1–4 on desktop | C2 |
 | **C4** | `loot` server: drops on death via `combat.onKill`, the `byTile` index, walk-over pickup, the fused bomb | A3 signature |
-| **C5** | `loot` client: drop rendering in `layers.floor`, pickup and explosion animations | C4 |
-| **C6** | HUD: XP bar where the mana bar was, level, coins, kills and deaths | M0.3 |
+| **C5** | `loot` server: the world spawner (`ARENA.md` §7.1) — coins, potions and the new `xpOrb` appearing on their own, capped, away from players, never a bomb | C4 |
+| **C6** | `loot` client: drop rendering in `layers.floor`, pickup and explosion animations | C4 |
+| **C7** | HUD: XP bar where the mana bar was, level, coins, kills and deaths | M0.3 |
 
-**Watch out for:** C6 and A5 both touch the HUD. Resolve it by having `combat`
+**Watch out for:** C7 and A5 both touch the HUD. Resolve it by having `combat`
 write through the existing `ctx.hud.setStats` rather than reaching into HUD
 internals. That is the only friction point between lanes.
 
