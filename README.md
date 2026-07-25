@@ -47,6 +47,39 @@ VITE_SERVER_URL=http://192.168.0.10:3000
 Production build: `npm run build && npm start` — the server then serves
 `/dist` itself.
 
+## Deployment
+
+The server is a **long-lived process holding a WebSocket connection per
+player and the world in memory**. That rules out serverless platforms:
+Vercel, Netlify Functions and Cloudflare Workers cannot keep a Socket.IO
+connection open, and each invocation would start with an empty world.
+
+Two options:
+
+**A. One host, simplest.** Deploy the whole repo to any platform that runs a
+Node process (Render, Railway, Fly.io, a VPS, Docker anywhere):
+
+```
+build:  npm install && npm run build
+start:  npm start
+```
+
+`npm start` serves the built client and the game server from the same origin,
+so no extra configuration is needed.
+
+**B. Static client + separate server.** Host `dist/` on a CDN or on Vercel and
+run the server elsewhere. The client must know where the server is, at build
+time:
+
+```
+# .env used by the client build
+VITE_SERVER_URL=https://your-server-host.example.com
+```
+
+The server already sends permissive CORS headers, so a cross-origin client
+works. Make sure the server host supports WebSockets and does not idle-stop
+the process.
+
 ### Smoke test
 
 With the server running:

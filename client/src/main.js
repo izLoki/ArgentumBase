@@ -3,10 +3,14 @@
  *
  * Flow: login -> connect -> WELCOME -> draw map -> start systems -> frame loop.
  * Adding a feature never requires touching this file: use client/src/systems/.
+ *
+ * The login handler is registered synchronously, before the renderer finishes
+ * initialising. Otherwise a slow or failing init would let the browser submit
+ * the form natively and reload the page.
  */
 
 import { S2C, C2S } from '@shared/protocol.js'
-import { net } from './net.js'
+import { net, SERVER_URL } from './net.js'
 import { state, applySnapshot, self } from './state.js'
 import { createStage } from './render/stage.js'
 import { drawTilemap } from './render/tilemap.js'
@@ -19,41 +23,61 @@ import { initSystems, invokeClient } from './systems/index.js'
 
 const PING_INTERVAL_MS = 2000
 
-const { app, layers } = await createStage(document.getElementById('game'))
+const loginEl = document.getElementById('login')
+const formEl = document.getElementById('login-form')
+const errorEl = document.getElementById('login-error')
+const submitEl = formEl.querySelector('button[type="submit"]')
 
-/** Context handed to every client system. */
-const ctx = {
-  app,
-  layers,
-  state,
-  net,
-  chat,
-  hud,
-  input,
-  self,
-}
+/** Renderer init runs in the background; the form works from the first frame. */
+let app = null
+let layers = null
+/** Context handed to every client system. Filled in once the stage is ready. */
+let ctx = null
 
-document.getElementById('login-form').addEventListener('submit', (e) => {
-  e.preventDefault()
-  const name = document.getElementById('login-name').value.trim()
-  const cls = document.getElementById('login-class').value
-  connect(name, cls)
+const stageReady = createStage(document.getElementById('game'))
+  .then((stage) => {
+    app = stage.app
+    layers = stage.layers
+    ctx = { app, layers, state, net, chat, hud, input, self }
+    return stage
+  })
+  .catch((err) => {
+    showError(`Could not start the renderer: ${err?.message ?? err}`)
+    throw err
+  })
+
+formEl.addEventListener('submit', (e) => {
+  e.preventDefault() // never let the browser navigate away
+  clearError()
+  submitEl.disabled = true
+  connect(
+    document.getElementById('login-name').value.trim(),
+    document.getElementById('login-class').value,
+  )
 })
 
 function connect(name, cls) {
-  net.connect()
+  const socket = net.connect()
 
-  net.on('connect', () => net.send(C2S.JOIN, { name, cls }))
-  net.on('connect_error', () =>
-    chat.log('No server on :3000 — run <b>npm run dev</b>.', 'err'),
-  )
+  socket.on('connect', () => net.send(C2S.JOIN, { name, cls }))
 
-  net.on(S2C.WELCOME, (welcome) => {
+  socket.on('connect_error', (err) => {
+    submitEl.disabled = false
+    showError(`Cannot reach the game server at ${SERVER_URL} (${err.message}).`)
+  })
+
+  socket.on(S2C.WELCOME, async (welcome) => {
     state.selfId = welcome.selfId
     state.map = welcome.map
     state.systems = welcome.systems
 
-    document.getElementById('login').classList.add('hidden')
+    try {
+      await stageReady
+    } catch {
+      return // the renderer failed; the error is already on screen
+    }
+
+    loginEl.classList.add('hidden')
     drawTilemap(layers.ground, welcome.map)
     hud.mount()
     chat.mount()
@@ -66,14 +90,16 @@ function connect(name, cls) {
     app.ticker.add(onFrame)
   })
 
-  net.on(S2C.SNAPSHOT, (snapshot) => {
+  socket.on(S2C.SNAPSHOT, (snapshot) => {
     applySnapshot(snapshot)
-    invokeClient('onSnapshot', ctx, snapshot)
+    if (ctx) invokeClient('onSnapshot', ctx, snapshot)
   })
 
-  net.on(S2C.CHAT_MSG, (msg) => chat.message(msg))
-  net.on(S2C.ERROR, (err) => chat.log(`⚠ ${err.message}`, 'err'))
-  net.on('disconnect', () => chat.log('Connection lost.', 'err'))
+  socket.on(S2C.CHAT_MSG, (msg) => chat.message(msg))
+  socket.on(S2C.ERROR, (err) => chat.log(`⚠ ${err.message}`, 'err'))
+  socket.on('disconnect', (reason) => {
+    chat.log(`Connection lost (${reason}).`, 'err')
+  })
 }
 
 function onFrame(ticker) {
@@ -89,4 +115,16 @@ function startPing() {
     net.latency = Math.round(performance.now() - payload.t)
   })
   setInterval(() => net.send(C2S.PING, { t: performance.now() }), PING_INTERVAL_MS)
+}
+
+/** Errors before the world loads must be visible on the login panel. */
+function showError(message) {
+  errorEl.textContent = message
+  errorEl.classList.remove('hidden')
+  console.error('[client]', message)
+}
+
+function clearError() {
+  errorEl.textContent = ''
+  errorEl.classList.add('hidden')
 }

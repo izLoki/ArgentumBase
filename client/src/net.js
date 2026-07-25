@@ -8,8 +8,15 @@
 
 import { io } from 'socket.io-client'
 
-// In development the client runs on :5173 and the server on :3000.
-const SERVER_URL =
+/**
+ * Where the game server lives.
+ *
+ * Set VITE_SERVER_URL at build time when the client and the server are hosted
+ * separately (for example a static client on a CDN and the server on a host
+ * that supports WebSockets). Otherwise: same origin in production, :3000 in
+ * development.
+ */
+export const SERVER_URL =
   import.meta.env.VITE_SERVER_URL ??
   (location.port === '5173' ? `http://${location.hostname}:3000` : location.origin)
 
@@ -19,7 +26,9 @@ export const net = {
   latency: 0,
 
   connect() {
-    this.socket = io(SERVER_URL, { transports: ['websocket'] })
+    // Polling is kept as a fallback: some hosts and corporate proxies block a
+    // direct WebSocket upgrade.
+    this.socket = io(SERVER_URL, { transports: ['websocket', 'polling'] })
     return this.socket
   },
 

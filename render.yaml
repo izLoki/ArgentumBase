@@ -1,0 +1,17 @@
+# Render Blueprint. With this file you can point Render at the repo and it
+# provisions the service without filling the form by hand.
+#
+# The client build is produced during the build step and served by the same
+# Node process, so the game runs on a single origin and needs no CORS setup.
+services:
+  - type: web
+    name: argentum-world
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22

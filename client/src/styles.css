@@ -54,6 +54,19 @@ canvas { display: block; }
 #login-form h1 { margin: 0; font-size: 26px; letter-spacing: 1px; }
 .muted, .hint { color: var(--muted); font-size: 12px; margin: 0; }
 
+.error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #5a2a2a;
+  border-radius: 6px;
+  background: #2a1414;
+  color: #f0a0a0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+button:disabled { opacity: 0.6; cursor: progress; }
+
 label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 
 input, select, button {

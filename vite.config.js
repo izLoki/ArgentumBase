@@ -15,7 +15,5 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
-    // main.js usa top-level await para inicializar Pixi.
-    target: 'es2022',
   },
 })

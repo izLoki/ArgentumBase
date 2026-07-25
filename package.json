@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Server-authoritative multiplayer tile world base (PixiJS + Node + Socket.IO)",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "node --watch server/index.js",
