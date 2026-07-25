@@ -29,6 +29,9 @@ export const C2S = {
   // --- chat ---
   CHAT_SAY: 'chat:say', // { text: string }
 
+  // --- profile ---
+  PROFILE_SPEND_POINT: 'profile:spendPoint', // { attr: 'str'|'agi'|'int'|'con' }
+
   // --- add your system's events below, in their own block ---
 }
 
@@ -42,6 +45,10 @@ export const S2C = {
 
   // --- chat ---
   CHAT_MSG: 'chat:msg', // { from, fromId, text, channel: 'say'|'system' }
+
+  // --- profile ---
+  PROFILE_SELF: 'profile:self', // { profile, stats, vitals } — owner only, never broadcast
+  PROFILE_LEVEL_UP: 'profile:levelUp', // { id, level }
 
   // --- add your system's events below, in their own block ---
 }

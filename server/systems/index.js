@@ -24,14 +24,18 @@
  */
 
 import core from './core.js'
+import profile from './profile.js'
 import chat from './chat.js'
 import combat from './combat.js'
 import npc from './npc.js'
 import inventory from './inventory.js'
 import spells from './spells.js'
 
-/** Order matters: `core` runs first (movement and base state). */
-export const systems = [core, chat, combat, npc, inventory, spells]
+/**
+ * Order matters: `core` runs first (movement and base state), then `profile`
+ * (the shared player identity and stats every other system reads).
+ */
+export const systems = [core, profile, chat, combat, npc, inventory, spells]
 
 /**
  * Event -> { system, handler } table, built at startup.

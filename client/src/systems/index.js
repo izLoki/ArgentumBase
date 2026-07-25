@@ -18,12 +18,14 @@
  * See CLAUDE.md for the full guide.
  */
 
+import profile from './profile.js'
 import combat from './combat.js'
 import npc from './npc.js'
 import inventory from './inventory.js'
 import spells from './spells.js'
 
-export const clientSystems = [combat, npc, inventory, spells]
+/** `profile` first: other systems read the local profile from it. */
+export const clientSystems = [profile, combat, npc, inventory, spells]
 
 const isLive = (ctx, system) => ctx.state.systems[system.id] === true
 
