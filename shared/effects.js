@@ -21,6 +21,15 @@
  * swapped gear mid-burn — simpler to reason about and cheaper than re-reading
  * the caster every tick.
  *
+ * Definition fields (only `name` and `stacking` are read everywhere):
+ *
+ *   name, icon   what the status UI shows
+ *   kind         'dot' | 'aura' — which runtime path handles it
+ *   everyMs      tick period, when `defaults.tick` exists
+ *   stacking     see STACKING below
+ *   maxStacks    ceiling for `stacking: 'stack'`
+ *   school       what a tick's damage counts as, so `taken:{fire:+30}` bites
+ *
  * Field meanings inside `defaults` (all optional):
  *
  *   stats  { damage:+8 }    folded into deriveStats via setModifier('effects')
@@ -28,6 +37,9 @@
  *   taken  { all:+20 }      percent damage taken, read by the damage pipeline
  *   dealt  { melee:+15 }    percent damage dealt, read by the damage pipeline
  *   tick   { hp:+6 }        applied every `everyMs` while active
+ *
+ * `taken` and `dealt` buckets are read by key: `all` always, plus the hit's
+ * school and `melee` when it was one. They add up, as percentages.
  */
 
 /** Booleans a system may read with `hasFlag(player, flag)`. */
@@ -50,6 +62,7 @@ export const EFFECTS = {
     kind: 'dot',
     everyMs: 500,
     stacking: 'strongest',
+    school: 'fire',
     defaults: { tick: { hp: -4 } },
   },
 

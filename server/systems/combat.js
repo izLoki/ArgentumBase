@@ -18,9 +18,10 @@
 import { C2S, S2C, ERROR_CODE } from '../../shared/protocol.js'
 import { DIR_VEC, blocksToTiles } from '../../shared/constants.js'
 import { SPELLS, ATTACK_ID, effectiveCooldown, spellDamage } from '../../shared/spells.js'
+import { REPEAT_KILL_WINDOW_MS, rewardFor } from '../../shared/rewards.js'
 import { world, playerAt, isTileOccupied } from '../game/state.js'
 import { findFreeTile, SPAWN } from '../world/map.js'
-import { profileOf, statsOf } from './profile.js'
+import { profileOf, statsOf, addExp, addGold, spendGold } from './profile.js'
 
 /**
  * A uniform handle to anything that can be hit. Spells, mob AI and bombs use
@@ -108,8 +109,12 @@ export default {
   enabled: true,
 
   init(ctx) {
+    ctx.world.ext.combat = {
+      /** `killerId>victimId` -> { count, at }. Feeds the repeat-kill lever. */
+      recentKills: new Map(),
+    }
     registerTargetProvider(PLAYERS_PROVIDER)
-    ctx.log('combat ready: damage pipeline, melee, death and respawn')
+    ctx.log('combat ready: damage pipeline, melee, death, respawn and rewards')
   },
 
   onPlayerJoin(ctx, player) {
@@ -139,10 +144,19 @@ export default {
     }
   },
 
+  /**
+   * The scoreboard, as `{ score: { playerId: [kills, deaths] } }`.
+   *
+   * Terse on purpose: this rides every snapshot, 15 times a second. Kills and
+   * deaths are public — gold and exp are not, and stay in PROFILE_SELF.
+   */
   collectSnapshot(ctx) {
-    // A4 publishes the scoreboard here. A3 has nothing continuous to say:
-    // hp and `dead` already ride the core PlayerView.
-    return undefined
+    const score = {}
+    for (const player of ctx.world.players.values()) {
+      const slot = player.ext.combat
+      if (slot) score[player.id] = [slot.kills, slot.deaths]
+    }
+    return { score }
   },
 
   handlers: {
@@ -511,17 +525,20 @@ function idOf(handle) {
 }
 
 /**
- * Called exactly once per death, by `applyDamage` and nothing else.
- * Rewards and the kill feed land here in A4; A3 only records and announces.
+ * Called exactly once per death, by `applyDamage` and nothing else. This is
+ * the only place a kill is credited, which is what keeps one hit from paying
+ * two rewards.
  */
 function confirmKill(ctx, victim, killer) {
   const what = kindOf(victim)
 
+  // A suicide, a bomb or a monster kills without earning anything: only a
+  // player who is not the victim gets paid.
+  const earns = killer?.providerId === 'players' && killer.ref !== victim.ref
+
+  const reward = earns ? grantReward(ctx, killer.ref, victim, what) : null
+  if (earns) killer.ref.ext.combat.kills += 1
   if (victim.providerId === 'players') killPlayer(ctx, victim.ref)
-  if (killer?.providerId === 'players') {
-    const slot = killer.ref.ext?.combat
-    if (slot && killer.ref !== victim.ref) slot.kills += 1
-  }
 
   ctx.broadcast(S2C.COMBAT_DEATH, {
     kind: what.kind,
@@ -531,6 +548,15 @@ function confirmKill(ctx, victim, killer) {
     killerName: killer?.ref?.name ?? null,
   })
 
+  if (reward) {
+    ctx.broadcast(S2C.COMBAT_KILLFEED, {
+      killerName: killer.ref.name,
+      victimName: victim.ref.name ?? what.type,
+      victimKind: what.kind,
+      reward: { exp: reward.exp, coins: reward.coins },
+    })
+  }
+
   for (const fn of killListeners) {
     try {
       fn(ctx, { killer: killer ?? null, victim, victimKind: what.kind, victimType: what.type })
@@ -538,6 +564,64 @@ function confirmKill(ctx, victim, killer) {
       console.error('[combat] onKill listener threw:', err)
     }
   }
+}
+
+/**
+ * Pays the killer, and charges the victim for the part that came out of their
+ * purse.
+ *
+ * Most of a player kill is LOOTED, not minted: the victim loses exactly what
+ * `fromPurse` says, so the economy the shop is priced against cannot inflate
+ * and dying finally costs something. Only the floor that keeps a poor victim
+ * from being worth nothing is created, and being minted it is the one part the
+ * anti-snowball levers scale. Monsters have no purse and pay from the table.
+ *
+ * @returns {{exp:number, coins:number}} what was actually granted
+ */
+function grantReward(ctx, killerPlayer, victim, what) {
+  const victimProfile = victim.providerId === 'players' ? profileOf(victim.ref) : null
+
+  const reward = rewardFor({
+    victimKind: what.kind,
+    victimType: what.type,
+    victimLevel: victimProfile?.level ?? 1,
+    victimGold: victimProfile?.gold ?? 0,
+    killerLevel: profileOf(killerPlayer)?.level ?? 1,
+    repeats: recordKill(ctx, killerPlayer.id, idOf(victim)),
+  })
+
+  // `spendGold` is atomic: it returns false and changes nothing when the purse
+  // cannot cover it. `fromPurse` is half of what was there, so this only fails
+  // in a race — and when it does, the killer keeps the minted part alone
+  // rather than being paid coins nobody lost.
+  const charged = reward.fromPurse > 0 ? spendGold(ctx, victim.ref, reward.fromPurse) : true
+  const coins = charged ? reward.coins : Math.max(0, reward.coins - reward.fromPurse)
+
+  if (coins > 0) addGold(ctx, killerPlayer, coins)
+  if (reward.exp > 0) addExp(ctx, killerPlayer, reward.exp)
+
+  return { exp: reward.exp, coins }
+}
+
+/**
+ * Records a kill and answers how many times this killer had already killed
+ * this victim inside the window — the input to the repeat-decay lever.
+ *
+ * Pruning happens here rather than on a tick: kills are rare, so paying for
+ * the sweep at the only moment the map grows keeps it off the hot path.
+ */
+function recordKill(ctx, killerId, victimId) {
+  const state = ctx.world.ext.combat
+  const now = Date.now()
+
+  for (const [key, entry] of state.recentKills) {
+    if (now - entry.at > REPEAT_KILL_WINDOW_MS) state.recentKills.delete(key)
+  }
+
+  const key = `${killerId}>${victimId}`
+  const repeats = state.recentKills.get(key)?.count ?? 0
+  state.recentKills.set(key, { count: repeats + 1, at: now })
+  return repeats
 }
 
 /** The corpse state. `dead` has the same single writer as `hp`. */

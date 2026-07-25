@@ -136,13 +136,13 @@ proof M0.2, M0.4 and M0.6 all landed correctly.
 Owns `server/systems/combat.js`, `server/systems/effects.js` and their client
 halves. Nothing else in the repo.
 
-| Task | What | Depends on |
-|---|---|---|
-| **A1** | `effects` server: the timed layer, flags, DoT and HoT ticks, expiry, and the change-gated `setModifier` from `ARENA.md` §3.1. **Definition versus instance (§3.3) and the four stacking policies (§3.4) are the core of this task** — an effect's magnitude comes from the caller, never from the table. Register the pipeline stage that handles `invulnerable` and `taken` multipliers | M0 |
-| **A2** | `effects` client: status icons above heads in `layers.overlay`, driven by `EFFECTS_SELF` and the public icon list in the snapshot | A1 |
-| **A3** | `combat` server: target providers, damage pipeline, melee attack, death, respawn timer and spawn protection. Register the `players` provider in `init` | M0 |
-| **A4** | `combat` server: kill attribution — `addExp` and `addGold` from `shared/rewards.js` — the kill feed, and `kills`/`deaths` in `collectSnapshot` | A3 |
-| **A5** | `combat` client: the ⚔ action, floating damage numbers in `layers.fx`, hit flash, death and respawn overlay, kill feed | A3 |
+| Task | What | Depends on | Status |
+|---|---|---|---|
+| **A1** | `effects` server: the timed layer, flags, DoT and HoT ticks, expiry, and the change-gated `setModifier` from `ARENA.md` §3.1. **Definition versus instance (§3.3) and the four stacking policies (§3.4) are the core of this task** — an effect's magnitude comes from the caller, never from the table. Register the pipeline stage that handles `invulnerable` and `taken` multipliers | M0 | **done** |
+| **A2** | `effects` client: status icons above heads in `layers.overlay`, driven by `EFFECTS_SELF` and the public icon list in the snapshot | A1 | **done** |
+| **A3** | `combat` server: target providers, damage pipeline, melee attack, death, respawn timer and spawn protection. Register the `players` provider in `init` | M0 | **done** |
+| **A4** | `combat` server: kill attribution — `addExp` and `addGold` from `shared/rewards.js` — the kill feed, and `kills`/`deaths` in `collectSnapshot` | A3 | **done** |
+| **A5** | `combat` client: the ⚔ action, floating damage numbers in `layers.fx`, hit flash, death and respawn overlay, kill feed | A3 | **done** |
 
 **Ship A3 first.** Lanes B and C call its API. The frozen signatures from M0
 mean they are not blocked, but the sooner it exists, the sooner anything can
@@ -169,17 +169,24 @@ and their client halves.
 | **B4c** | `npc` AI: first-off-cooldown-in-range ability choice, plus the two `behaviour` values — `brawler` and the bat's `hitAndRun` | B4b | |
 | **B5** | `npc` client: mob rendering with health bars in `layers.entities`, and `mobViewPosition` for other systems to anchor FX | B4b | |
 
-Two contract notes came out of B2, both worth knowing before A1 and B4:
+Two contract notes came out of B2:
 
-- **`applyEffect` now takes `opts.params`.** The definition/instance split (§3.3)
+- **`applyEffect` takes `opts.params`.** The definition/instance split (§3.3)
   is unusable without it — the spell actions carry `params: { tick: { hp: -7 } }`
-  and something has to receive them. The JSDoc in `server/systems/effects.js`
-  records the shape; A1 has to honour it.
+  and something has to receive them. A1 shipped honouring it, so `spells` and
+  `effects` already agree; B4a inherits the same door for `poisoned`.
 - **Area questions are asked with body radius, not centre distance.**
   `combat.targetsInRadius` compares centres, which would make a `radius: 0`
   trap fire only on a player standing dead centre on an 8 px tile. `spells`
   wraps it in `bodiesInRadius`, inflating by `PLAYER_RADIUS`. Anything else
   asking "did someone touch this" wants the same wrapper.
+
+**B4a also has to retire the old roster from code.** `shared/rewards.js` and
+the `MOB_TYPES` stub in `server/systems/npc.js` still name `wisp` and `imp`
+with `spark`, `hex` and `stoneSlam` — the spec moved to dragon / golem /
+skeleton / bat (`ARENA.md` §5) but the code was deliberately left alone. Those
+two tables and the doc must land in the same commit or the reward lookup will
+miss on every monster kill.
 
 B4b depends on B2 because mobs cast through the same executor. Inside the lane
 that is sequential; across lanes it blocks nobody.
@@ -195,15 +202,15 @@ bandwidth wall shows up first.
 Owns `shared/gear.js`, `server/systems/inventory.js`, `server/systems/loot.js`
 and their client halves.
 
-| Task | What | Depends on |
-|---|---|---|
-| **C1** | `shared/gear.js`: tier tables and prices for the four slots | M0 |
-| **C2** | `inventory` server: buy by slot, next-tier-only validation, atomic `spendGold`, one `setModifier`, and the damage pipeline stage that reads the non-stat `mult` fields | C1, A3 signature |
-| **C3** | `inventory` client: the shop modal inside the mobile budget, the 🛒 button in the utility column, digit keys 1–4 on desktop | C2 |
-| **C4** | `loot` server: drops on death via `combat.onKill`, the `byTile` index, walk-over pickup, the fused bomb | A3 signature |
-| **C5** | `loot` server: the world spawner (`ARENA.md` §7.1) — coins, potions and the new `xpOrb` appearing on their own, capped, away from players, never a bomb | C4 |
-| **C6** | `loot` client: drop rendering in `layers.floor`, pickup and explosion animations | C4 |
-| **C7** | HUD: XP bar where the mana bar was, level, coins, kills and deaths | M0.3 |
+| Task | What | Depends on | Status |
+|---|---|---|---|
+| **C1** | `shared/gear.js`: tier tables and prices for the four slots | M0 | **done** |
+| **C2** | `inventory` server: buy by slot, next-tier-only validation, atomic `spendGold`, one `setModifier`, and the damage pipeline stage that reads the non-stat `mult` fields | C1, A3 signature | **done** |
+| **C3** | `inventory` client: the shop modal inside the mobile budget, the 🛒 button in the utility column, digit keys 1–4 on desktop | C2 | **done** |
+| **C4** | `loot` server: drops on death via `combat.onKill`, the `byTile` index, walk-over pickup, the fused bomb | A3 signature | |
+| **C5** | `loot` server: the world spawner (`ARENA.md` §7.1) — coins, potions and the new `xpOrb` appearing on their own, capped, away from players, never a bomb | C4 | |
+| **C6** | `loot` client: drop rendering in `layers.floor`, pickup and explosion animations | C4 | |
+| **C7** | HUD: XP bar where the mana bar was, level, coins, kills and deaths | M0.3 | **done** |
 
 **Watch out for:** C7 and A5 both touch the HUD. Resolve it by having `combat`
 write through the existing `ctx.hud.setStats` rather than reaching into HUD
@@ -244,9 +251,13 @@ initialises, so an unfinished lane cannot break anyone else's world.
 
 These do not block M0, but they should be settled before Lane A ships A4.
 
-1. **Snowball control.** With death costing nothing, whoever gets ahead stays
-   ahead. Pick at least two of: diminishing XP by killer level, repeat-kill
-   decay, and a bounty multiplier on the leader.
+1. ~~**Snowball control.**~~ **Settled in A4.** Death now costs half the
+   victim's purse, paid straight to the killer (`PURSE_LOOT_PCT`, `ARENA.md`
+   §1.5). That is a lever in its own right — a broke player is worth nothing
+   and a rich leader is worth hunting — on top of the two that were already
+   on: diminishing XP by killer level and repeat-kill decay. The bounty
+   multiplier stays off; the purse achieves the same thing without a
+   leaderboard.
 2. **The map.** This plan does not rewrite `server/world/map.js` — the existing
    walled town is the arena. A purpose-built symmetric arena is a separate
    milestone adding `server/world/arena.js`.

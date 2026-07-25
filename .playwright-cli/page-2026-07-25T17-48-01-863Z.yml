@@ -1,0 +1,20 @@
+- generic [active] [ref=e1]:
+  - generic:
+    - generic [ref=e14]:
+      - generic [ref=e17]: 170/170
+      - generic [ref=e19]: 0/120 xp
+      - generic [ref=e20]:
+        - generic [ref=e21]: Cata
+        - generic [ref=e22]: Lv 1
+    - generic [ref=e23]:
+      - generic:
+        - generic: Drag the left side of the screen to move · 💬 to talk.
+        - generic: Cata joined the world.
+    - generic [ref=e24]: tile 123,91 · tick 6299 · ping 0ms · 3 online
+    - generic:
+      - button "⚔" [ref=e26] [cursor=pointer]
+      - generic:
+        - button "🎒" [ref=e27] [cursor=pointer]
+        - button "👤" [ref=e28] [cursor=pointer]
+        - button "🛒" [ref=e29] [cursor=pointer]
+    - button "Chat" [ref=e30] [cursor=pointer]: 💬

@@ -17,6 +17,11 @@
   /* Set by client/src/viewport.js. */
   --app-h: 100vh; /* real height: 100vh lies while the mobile URL bar is up */
   --kb: 0px; /* soft-keyboard overlap at the bottom of the screen */
+
+  /* Set by client/src/ui/hud.js: screen the permanent sidebar takes from the
+     world. The canvas is inset by it, so the camera centres the player in what
+     is actually visible. 0 whenever the sidebar floats or is closed. */
+  --hud-right: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -32,6 +37,10 @@ html, body {
 }
 
 canvas { display: block; }
+
+/* The renderer sizes itself to this box, not to the window, so the sidebar
+   takes screen away from the world instead of covering it. */
+#game { position: fixed; inset: 0 var(--hud-right) 0 0; }
 
 .hidden { display: none !important; }
 
@@ -185,7 +194,7 @@ body.touch select {
 
 .debug {
   position: absolute;
-  right: calc(12px + var(--safe-r));
+  right: calc(12px + var(--safe-r) + var(--hud-right));
   bottom: calc(12px + var(--safe-b));
   font-size: 11px;
   color: var(--muted);

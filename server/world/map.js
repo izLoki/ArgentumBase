@@ -86,9 +86,11 @@ function generateBlocks() {
   carveRect(blocks, cx, cy, 17, 13, TILE.WALL)
   carveRect(blocks, cx + 1, cy + 1, 15, 11, TILE.FLOOR)
 
-  // Two blocks per gate, not one. A one block gate is 4 tiles and a body is 3,
-  // so half the approaches would bounce off the frame — passable, but it reads
-  // as a bug to whoever is walking into it.
+  // Two blocks of clearance per gate, never one. A body is 5 tiles wide and a
+  // single block is 4, so a one block opening is not a tight gate — it is a
+  // wall. The north and south gates are 2 blocks wide; the east and west ones
+  // are 1 block deep (the wall's own thickness) but 2 blocks tall, which is the
+  // dimension a body crossing them has to fit through.
   carveRect(blocks, cx + 8, cy, 2, 1, TILE.FLOOR)
   carveRect(blocks, cx + 8, cy + 12, 2, 1, TILE.FLOOR)
   carveRect(blocks, cx, cy + 6, 1, 2, TILE.FLOOR)

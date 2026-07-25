@@ -150,6 +150,26 @@ Client (built in `client/src/main.js`):
 | `ctx.touch` | `addButton` / `removeButton` / `buttonOf(id)` when `action()` is not enough |
 | `ctx.hud`, `ctx.chat` | HUD updates and message output |
 
+### The HUD sidebar
+
+`ctx.hud` is the character sidebar — permanent on the right on desktop, a 🎒
+overlay (`I`) on a phone. Never touch its elements; push into it:
+
+```js
+ctx.hud.setStats({ kills, deaths })      // any subset: hp, maxHp, exp, expToNext, level, gold
+ctx.hud.setGear({ weapon: 2, boots: 1 }) // owned tier per gear slot
+```
+
+Its two sections are stacked, never tabbed: **Equipment**, the four gear slots
+with their tier, and **Spells**, the class's six rail slots with their key and
+unlock level, both read from `shared/gear.js` and `shared/spells.js`. The HUD
+draws them; whoever owns the behaviour pushes state in through the calls above.
+
+`--hud-right` is the width the sidebar takes from the world. `#game` is inset
+by it, so the camera already centres the player in what is visible — but a
+panel of your own anchored to the right edge has to add it, the way
+`client/src/systems/profile.js` does.
+
 ## The player profile
 
 Anything about *who a player is* — level, exp, gold, attributes and the stats
@@ -304,8 +324,60 @@ when the **whole footprint** fits. Use `ctx.canStand(x, y)` — not
 place anything. Two entities collide when their footprints overlap
 (`bodiesOverlap` in `shared/grid.js`).
 
-When you design terrain, work in blocks. A one tile wide gap is 8 px and
-nothing fits through it.
+When you design terrain, work in blocks — and leave **two blocks** of clearance
+wherever something has to walk through. A body is 5 tiles across (`PLAYER_RADIUS`
+is 2), a block is 4, so a one block opening is not a tight gate: it is a wall.
+
+## Character sprites
+
+Classes are drawn from one atlas per class, `client/src/render/sprites/<cls>.png`,
+registered in the `SHEETS` map at the top of `client/src/render/sprites.js`. That
+map is the whole wiring: a class listed there gets a sprite, a class missing from
+it keeps the coloured fallback body. Nothing outside `render/` changes either way.
+
+An atlas is a **3 x 4 grid of 144 x 192 cells** — three walk frames across, one
+row per direction in `DIR` order (down, left, right, up). Two rules make it work:
+
+- **Align every cell by the feet**, on `FEET_Y` (186) and centred horizontally on
+  the body. Aligning by bounding box instead makes the character slide sideways
+  whenever an arm or a weapon swings.
+- **Frames read `contact, pass, contact`.** The cycle plays `0 1 2 1`, advanced by
+  DISTANCE WALKED, not by a timer — so the legs stay in step with the feet at any
+  speed, and a slowed or hastened player never moonwalks.
+
+`client/src/render/entities.js` draws the sprite **larger than the body**: feet at
+the bottom of the 5x5 footprint, head far above it. The footprint is what
+collides; the sprite is a picture of it. Never measure gameplay against the
+drawing — `PLAYER_RADIUS` is the only body there is.
+
+`tools/cut-sprite-atlas.py` turns a raw sheet into that layout — it finds each
+sprite by its alpha and re-anchors it, which is the part you do not want to do by
+hand. The three classes were cut with:
+
+```sh
+python tools/cut-sprite-atlas.py warrior.png client/src/render/sprites/warrior.png --rows 0 1 2 3
+python tools/cut-sprite-atlas.py mage.png    client/src/render/sprites/mage.png    --rows 0 1m 1 3
+python tools/cut-sprite-atlas.py hunter.png  client/src/render/sprites/hunter.png  --rows 0 1 2 3
+```
+
+`--rows` names the source row behind each direction, and `m` mirrors it: the mage
+sheet only draws a right-facing pose, so its LEFT is that row flipped.
+
+Three things about reading and fitting a raw sheet:
+
+- **Read the direction off the FACE**, never off a hat, a plume or a weapon — the
+  art puts those wherever it likes. One visible eye sits on the side the
+  character faces; a helmet's visor slit does the same job; no face at all is the
+  back view.
+- **Every class comes out the same height** — the tool fits each sheet to the cell
+  on its own, so sources drawn at different sizes still land on one baseline. If a
+  tall plume or a raised weapon eats the cell and leaves that class looking small,
+  trim it with `--scale 0.95` rather than editing the art.
+- **A sheet that runs off the bottom of its canvas gets its baseline
+  reconstructed** from the intact poses, and the tool says so loudly. That keeps
+  the pose standing at the right height, but the pixels it lost are gone — the fix
+  is to re-export the sheet taller. The hunter's UP row is currently in this state,
+  missing the boots.
 
 ## Movement is predicted
 
@@ -337,8 +409,10 @@ lands on the next snapshot. What it does require:
 - **Snapshots are full state**, sent 15 times per second. The client
   interpolates for smoothness and predicts its own steps.
 - **The world lives in memory.** There is no database and none is needed.
-- **No assets.** Everything is drawn with Pixi primitives. Replacing that with
-  a real tileset should only touch `client/src/render/`.
+- **Art lives in `client/src/render/`, and nowhere else.** Terrain and effects
+  are still Pixi primitives; characters are sprite atlases (see below). Anything
+  that replaces a primitive with an image belongs under that directory, so the
+  rest of the client never learns that images exist.
 
 ## Style
 

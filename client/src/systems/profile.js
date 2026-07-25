@@ -62,10 +62,15 @@ export default {
       mine = payload?.profile ?? null
       myDerivedStats = payload?.stats ?? null
 
-      // Experience and level are private, so the snapshot cannot carry them:
-      // the profile is the only thing that can feed the HUD's second bar.
+      // Experience, level and gold are private, so the snapshot cannot carry
+      // them: the profile is the only thing that can feed those HUD readouts.
       if (mine) {
-        ctx.hud.setStats({ exp: mine.exp, expToNext: mine.expToNext, level: mine.level })
+        ctx.hud.setStats({
+          exp: mine.exp,
+          expToNext: mine.expToNext,
+          level: mine.level,
+          gold: mine.gold,
+        })
       }
 
       // Prediction has to walk at the same rate the server allows, or agility
@@ -208,7 +213,9 @@ function injectStyles() {
     #profile-panel {
       position: absolute;
       top: calc(12px + var(--safe-t));
-      right: calc(12px + var(--safe-r));
+      /* --hud-right is what the HUD sidebar takes from the world: without it
+         this panel would open underneath the sidebar on desktop. */
+      right: calc(12px + var(--safe-r) + var(--hud-right));
       width: min(260px, 62vw);
       max-height: calc(var(--app-h) - 90px - var(--safe-t) - var(--safe-b));
       overflow-y: auto;
