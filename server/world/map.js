@@ -1,11 +1,31 @@
 /**
  * Map generation and queries.
  *
- * The map is a flat array of `MAP_WIDTH * MAP_HEIGHT` tile ids, generated
- * from a fixed seed so every run produces the same world.
+ * The world is DESIGNED IN BLOCKS and STORED IN TILES. Generation works on a
+ * 64x48 block grid — a lake is 10x6 blocks, a wall is one block thick — and
+ * the result is expanded by `BLOCK_TILES` into the fine tile grid the game
+ * actually moves on. That is what keeps the world the same physical size while
+ * a step became four times smaller.
+ *
+ * Design terrain in blocks. Never hand-place single tiles: a one tile wide gap
+ * is 8 px and no body fits through it.
  */
 
-import { MAP_WIDTH, MAP_HEIGHT, TILE, TILE_META } from '../../shared/constants.js'
+import {
+  MAP_WIDTH,
+  MAP_HEIGHT,
+  MAP_BLOCKS_W,
+  MAP_BLOCKS_H,
+  BLOCK_TILES,
+  PLAYER_RADIUS,
+  TILE,
+} from '../../shared/constants.js'
+import {
+  tileAt as tileOf,
+  isWalkable as isWalkableOn,
+  canStand as canStandOn,
+  encodeTiles,
+} from '../../shared/grid.js'
 
 const SEED = 1337
 
@@ -21,62 +41,83 @@ function makeRng(seed) {
   }
 }
 
-function idx(x, y) {
-  return y * MAP_WIDTH + x
+function blockIdx(x, y) {
+  return y * MAP_BLOCKS_W + x
 }
 
-function carveRect(tiles, x0, y0, w, h, tile) {
+function carveRect(blocks, x0, y0, w, h, tile) {
   for (let y = y0; y < y0 + h; y++) {
     for (let x = x0; x < x0 + w; x++) {
-      if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) continue
-      tiles[idx(x, y)] = tile
+      if (x < 0 || y < 0 || x >= MAP_BLOCKS_W || y >= MAP_BLOCKS_H) continue
+      blocks[blockIdx(x, y)] = tile
     }
   }
 }
 
-function generateTiles() {
+/** Everything here is in BLOCKS. */
+function generateBlocks() {
   const rng = makeRng(SEED)
-  const tiles = new Array(MAP_WIDTH * MAP_HEIGHT).fill(TILE.GRASS)
+  const blocks = new Uint8Array(MAP_BLOCKS_W * MAP_BLOCKS_H).fill(TILE.GRASS)
 
   // Rock border: the world is closed.
-  for (let x = 0; x < MAP_WIDTH; x++) {
-    tiles[idx(x, 0)] = TILE.ROCK
-    tiles[idx(x, MAP_HEIGHT - 1)] = TILE.ROCK
+  for (let x = 0; x < MAP_BLOCKS_W; x++) {
+    blocks[blockIdx(x, 0)] = TILE.ROCK
+    blocks[blockIdx(x, MAP_BLOCKS_H - 1)] = TILE.ROCK
   }
-  for (let y = 0; y < MAP_HEIGHT; y++) {
-    tiles[idx(0, y)] = TILE.ROCK
-    tiles[idx(MAP_WIDTH - 1, y)] = TILE.ROCK
+  for (let y = 0; y < MAP_BLOCKS_H; y++) {
+    blocks[blockIdx(0, y)] = TILE.ROCK
+    blocks[blockIdx(MAP_BLOCKS_W - 1, y)] = TILE.ROCK
   }
 
   // Lake to the north west.
-  carveRect(tiles, 6, 5, 10, 6, TILE.WATER)
-  carveRect(tiles, 8, 4, 6, 1, TILE.WATER)
+  carveRect(blocks, 6, 5, 10, 6, TILE.WATER)
+  carveRect(blocks, 8, 4, 6, 1, TILE.WATER)
 
   // Scattered forest.
   for (let i = 0; i < 260; i++) {
-    const x = 1 + Math.floor(rng() * (MAP_WIDTH - 2))
-    const y = 1 + Math.floor(rng() * (MAP_HEIGHT - 2))
-    if (tiles[idx(x, y)] === TILE.GRASS) tiles[idx(x, y)] = TILE.TREE
+    const x = 1 + Math.floor(rng() * (MAP_BLOCKS_W - 2))
+    const y = 1 + Math.floor(rng() * (MAP_BLOCKS_H - 2))
+    if (blocks[blockIdx(x, y)] === TILE.GRASS) blocks[blockIdx(x, y)] = TILE.TREE
   }
 
   // Central town: floor surrounded by walls with four gates.
-  const cx = Math.floor(MAP_WIDTH / 2) - 8
-  const cy = Math.floor(MAP_HEIGHT / 2) - 6
-  carveRect(tiles, cx, cy, 17, 13, TILE.WALL)
-  carveRect(tiles, cx + 1, cy + 1, 15, 11, TILE.FLOOR)
-  tiles[idx(cx + 8, cy)] = TILE.FLOOR
-  tiles[idx(cx + 8, cy + 12)] = TILE.FLOOR
-  tiles[idx(cx, cy + 6)] = TILE.FLOOR
-  tiles[idx(cx + 16, cy + 6)] = TILE.FLOOR
+  const cx = Math.floor(MAP_BLOCKS_W / 2) - 8
+  const cy = Math.floor(MAP_BLOCKS_H / 2) - 6
+  carveRect(blocks, cx, cy, 17, 13, TILE.WALL)
+  carveRect(blocks, cx + 1, cy + 1, 15, 11, TILE.FLOOR)
+
+  // Two blocks per gate, not one. A one block gate is 4 tiles and a body is 3,
+  // so half the approaches would bounce off the frame — passable, but it reads
+  // as a bug to whoever is walking into it.
+  carveRect(blocks, cx + 8, cy, 2, 1, TILE.FLOOR)
+  carveRect(blocks, cx + 8, cy + 12, 2, 1, TILE.FLOOR)
+  carveRect(blocks, cx, cy + 6, 1, 2, TILE.FLOOR)
+  carveRect(blocks, cx + 16, cy + 6, 1, 2, TILE.FLOOR)
 
   // Dirt roads leaving town.
-  carveRect(tiles, cx + 8, cy + 13, 1, MAP_HEIGHT - (cy + 14), TILE.DIRT)
-  carveRect(tiles, cx + 17, cy + 6, MAP_WIDTH - (cx + 18), 1, TILE.DIRT)
+  carveRect(blocks, cx + 8, cy + 13, 1, MAP_BLOCKS_H - (cy + 14), TILE.DIRT)
+  carveRect(blocks, cx + 17, cy + 6, MAP_BLOCKS_W - (cx + 18), 1, TILE.DIRT)
 
+  return blocks
+}
+
+/** One block becomes a BLOCK_TILES x BLOCK_TILES patch of identical tiles. */
+function expand(blocks) {
+  const tiles = new Uint8Array(MAP_WIDTH * MAP_HEIGHT)
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    const row = Math.floor(y / BLOCK_TILES) * MAP_BLOCKS_W
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      tiles[y * MAP_WIDTH + x] = blocks[row + Math.floor(x / BLOCK_TILES)]
+    }
+  }
   return tiles
 }
 
-const tiles = generateTiles()
+export const map = {
+  w: MAP_WIDTH,
+  h: MAP_HEIGHT,
+  tiles: expand(generateBlocks()),
+}
 
 /** Spawn point: town centre. */
 export const SPAWN = {
@@ -84,33 +125,43 @@ export const SPAWN = {
   y: Math.floor(MAP_HEIGHT / 2),
 }
 
-export const map = {
-  w: MAP_WIDTH,
-  h: MAP_HEIGHT,
-  tiles,
+/** What travels in WELCOME. Built once — the map never changes. */
+export const mapWire = {
+  w: map.w,
+  h: map.h,
+  block: BLOCK_TILES,
+  rle: encodeTiles(map.tiles),
 }
 
 export function tileAt(x, y) {
-  if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) return TILE.ROCK
-  return tiles[idx(x, y)]
+  return tileOf(map, x, y)
 }
 
-/** True when the terrain is walkable (entities are not considered). */
+/** True when the terrain of one tile is walkable (entities are not considered). */
 export function isWalkable(x, y) {
-  const meta = TILE_META[tileAt(x, y)]
-  return !!meta && !meta.blocked
+  return isWalkableOn(map, x, y)
 }
 
-/** Nearest free tile around (x, y), searched in growing rings. */
-export function findFreeTile(x, y, isOccupied = () => false, maxRadius = 12) {
-  if (isWalkable(x, y) && !isOccupied(x, y)) return { x, y }
+/** True when a whole body fits, centred on the tile. Use this to place anything. */
+export function canStand(x, y, radius = PLAYER_RADIUS) {
+  return canStandOn(map, x, y, radius)
+}
+
+/**
+ * Nearest tile a body fits on around (x, y), searched in growing rings.
+ *
+ * `maxRadius` is in tiles, so it shrank by `BLOCK_TILES` when the grid got
+ * finer: the default covers the same ground it used to.
+ */
+export function findFreeTile(x, y, isOccupied = () => false, maxRadius = 12 * BLOCK_TILES) {
+  if (canStand(x, y) && !isOccupied(x, y)) return { x, y }
   for (let r = 1; r <= maxRadius; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue
         const nx = x + dx
         const ny = y + dy
-        if (isWalkable(nx, ny) && !isOccupied(nx, ny)) return { x: nx, y: ny }
+        if (canStand(nx, ny) && !isOccupied(nx, ny)) return { x: nx, y: ny }
       }
     }
   }

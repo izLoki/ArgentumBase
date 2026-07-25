@@ -11,9 +11,16 @@
  * ever arrives for the local player, over S2C.PROFILE_SELF.
  */
 
-import { C2S, S2C } from '@shared/protocol.js'
-import { ATTRIBUTES, ATTRIBUTE_LABELS, STAT_KEYS, STAT_LABELS } from '@shared/profile.js'
-import { CLASSES } from '@shared/constants.js'
+import { S2C } from '@shared/protocol.js'
+import {
+  ATTRIBUTES,
+  ATTRIBUTE_LABELS,
+  MOVE_MAX_PCT,
+  STAT_KEYS,
+  STAT_LABELS,
+} from '@shared/profile.js'
+import { CLASSES, MOVE_COOLDOWN_MS } from '@shared/constants.js'
+import { movement } from '../movement.js'
 
 /** Keydown repeats while the key is held; one toggle per press is enough. */
 const TOGGLE_COOLDOWN_MS = 200
@@ -37,6 +44,7 @@ export default {
       id: 'profile',
       label: '👤',
       key: 'KeyP',
+      slot: 'utility', // a panel toggle, not something used mid-fight
       onPress: () => togglePanel(),
     })
   },
@@ -54,9 +62,18 @@ export default {
       mine = payload?.profile ?? null
       myDerivedStats = payload?.stats ?? null
 
-      // The snapshot carries no mana, so the profile feeds the HUD bar.
-      const vitals = payload?.vitals
-      if (vitals) ctx.hud.setStats({ mana: vitals.mana, maxMana: vitals.maxMana })
+      // Experience and level are private, so the snapshot cannot carry them:
+      // the profile is the only thing that can feed the HUD's second bar.
+      if (mine) {
+        ctx.hud.setStats({ exp: mine.exp, expToNext: mine.expToNext, level: mine.level })
+      }
+
+      // Prediction has to walk at the same rate the server allows, or agility
+      // would be a number in a panel and nothing else.
+      if (myDerivedStats) {
+        const pct = Math.min(MOVE_MAX_PCT, myDerivedStats.moveSpeed ?? 0)
+        movement.setCooldown(MOVE_COOLDOWN_MS * (1 - pct / 100))
+      }
 
       render()
       for (const fn of listeners) {
@@ -123,7 +140,7 @@ function buildPanel(ctx) {
     <div class="pf-level muted"></div>
     <div class="bar"><i class="fill pf-exp"></i><b class="pf-exp-text"></b></div>
     <div class="pf-gold"></div>
-    <div class="pf-section muted">Attributes<span class="pf-points"></span></div>
+    <div class="pf-section muted">Attributes</div>
     <div class="pf-attrs"></div>
     <div class="pf-section muted">Stats</div>
     <div class="pf-stats"></div>
@@ -137,22 +154,16 @@ function buildPanel(ctx) {
     exp: panel.querySelector('.pf-exp'),
     expText: panel.querySelector('.pf-exp-text'),
     gold: panel.querySelector('.pf-gold'),
-    points: panel.querySelector('.pf-points'),
     attrs: panel.querySelector('.pf-attrs'),
     stats: panel.querySelector('.pf-stats'),
   }
 
+  // Read-only: attributes are a pure function of class and level, so there is
+  // nothing to spend and no button to press.
   for (const key of ATTRIBUTES) {
     const row = document.createElement('div')
     row.className = 'pf-row'
-    row.innerHTML = `
-      <span>${ATTRIBUTE_LABELS[key]}</span>
-      <b data-attr="${key}">0</b>
-      <button type="button" class="pf-plus" data-spend="${key}">+</button>
-    `
-    row.querySelector('.pf-plus').addEventListener('click', () => {
-      ctx.net.send(C2S.PROFILE_SPEND_POINT, { attr: key })
-    })
+    row.innerHTML = `<span>${ATTRIBUTE_LABELS[key]}</span><b data-attr="${key}">0</b>`
     els.attrs.appendChild(row)
   }
 
@@ -176,12 +187,8 @@ function render() {
   els.exp.style.transform = `scaleX(${Math.min(1, ratio)})`
   els.expText.textContent = `${mine.exp}/${mine.expToNext} xp`
 
-  els.points.textContent = mine.points > 0 ? ` · ${mine.points} to spend` : ''
   for (const key of ATTRIBUTES) {
     panel.querySelector(`[data-attr="${key}"]`).textContent = mine.attributes[key]
-  }
-  for (const btn of panel.querySelectorAll('.pf-plus')) {
-    btn.classList.toggle('hidden', mine.points <= 0)
   }
 
   if (!myDerivedStats) return
@@ -218,26 +225,17 @@ function injectStyles() {
     #profile-panel .pf-section { margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
     #profile-panel .pf-row {
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      grid-template-columns: 1fr auto;
       align-items: center;
       gap: 6px;
       line-height: 1.5;
     }
-    #profile-panel .pf-plus {
-      width: 22px;
-      height: 22px;
-      padding: 0;
-      border-radius: 4px;
-      font-size: 13px;
-      line-height: 1;
-    }
-    /* Below 44px a thumb misses, and the panel has to leave the rail alone. */
+    /* The panel has to leave the action rail alone. */
     body.touch #profile-panel {
       top: calc(34px + var(--safe-t));
       width: min(280px, 74vw);
       max-height: calc(var(--app-h) * 0.62);
     }
-    body.touch #profile-panel .pf-plus { width: 44px; height: 44px; font-size: 18px; }
     body.touch #profile-panel .pf-row { line-height: 1.8; }
   `
   document.head.appendChild(style)

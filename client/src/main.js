@@ -11,12 +11,13 @@
 
 import { S2C, C2S } from '@shared/protocol.js'
 import { net, SERVER_URL } from './net.js'
-import { state, applySnapshot, self } from './state.js'
+import { state, applySnapshot, setMap, self } from './state.js'
 import { createStage } from './render/stage.js'
 import { drawTilemap } from './render/tilemap.js'
 import { syncEntities } from './render/entities.js'
 import { updateCamera } from './render/camera.js'
 import { input } from './input.js'
+import { movement } from './movement.js'
 import { viewport } from './viewport.js'
 import { hud } from './ui/hud.js'
 import { chat } from './ui/chat.js'
@@ -45,7 +46,7 @@ const stageReady = createStage(document.getElementById('game'))
   .then((stage) => {
     app = stage.app
     layers = stage.layers
-    ctx = { app, layers, state, net, chat, hud, input, self, viewport, touch, action }
+    ctx = { app, layers, state, net, chat, hud, input, self, movement, viewport, touch, action }
     return stage
   })
   .catch((err) => {
@@ -77,8 +78,17 @@ function connect(name, cls) {
 
   socket.on(S2C.WELCOME, async (welcome) => {
     state.selfId = welcome.selfId
-    state.map = welcome.map
     state.systems = welcome.systems
+    // A reconnect hands out a new player whose input sequence starts at zero.
+    movement.reset()
+
+    let map
+    try {
+      map = setMap(welcome.map) // run-length encoded on the wire
+    } catch (err) {
+      submitEl.disabled = false // the login panel is still up: let them retry
+      return showError(`The server sent a map this client cannot read: ${err.message}`)
+    }
 
     try {
       await stageReady
@@ -87,7 +97,7 @@ function connect(name, cls) {
     }
 
     loginEl.classList.add('hidden')
-    drawTilemap(layers.ground, welcome.map)
+    drawTilemap(layers.ground, map)
 
     // Everything below binds listeners or timers exactly once. A reconnect
     // delivers a fresh WELCOME with a new player id, and re-running this
@@ -117,6 +127,9 @@ function connect(name, cls) {
 
   socket.on(S2C.SNAPSHOT, (snapshot) => {
     applySnapshot(snapshot)
+    // Before the systems see it: they read the local player's position, and it
+    // is only correct once the unacknowledged steps have been replayed.
+    movement.reconcile()
     if (ctx) invokeClient('onSnapshot', ctx, snapshot)
   })
 
@@ -129,7 +142,7 @@ function connect(name, cls) {
 
 function onFrame(ticker) {
   input.update()
-  syncEntities(layers.entities)
+  syncEntities(layers.entities, ticker.deltaMS)
   updateCamera(app, layers.camera)
   hud.update()
   invokeClient('onUpdate', ctx, ticker.deltaMS)

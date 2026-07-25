@@ -26,16 +26,19 @@
 import core from './core.js'
 import profile from './profile.js'
 import chat from './chat.js'
+import effects from './effects.js'
 import combat from './combat.js'
+import spells from './spells.js'
 import npc from './npc.js'
 import inventory from './inventory.js'
-import spells from './spells.js'
+import loot from './loot.js'
 
 /**
  * Order matters: `core` runs first (movement and base state), then `profile`
- * (the shared player identity and stats every other system reads).
+ * (the shared player identity and stats every other system reads), then
+ * `effects` (it expires buffs before anything reads a stat this tick).
  */
-export const systems = [core, profile, chat, combat, npc, inventory, spells]
+export const systems = [core, profile, chat, effects, combat, spells, npc, inventory, loot]
 
 /**
  * Event -> { system, handler } table, built at startup.

@@ -22,8 +22,72 @@ M0  Foundations  ── one person, one commit, blocks everything
 ```
 
 Each lane touches a disjoint set of files. The only shared files are
-`server/systems/index.js` and `client/src/systems/index.js`, where the
-conflict is a two-line append that git resolves on its own.
+`server/systems/index.js` and `client/src/systems/index.js`, and since M0
+already registered all nine systems there, **neither file needs touching
+again**. The same goes for `shared/protocol.js`: every arena event is already
+declared.
+
+---
+
+## Two people
+
+The three lanes fold onto two people by keeping the dependency arrow pointing
+one way. **P2 calls P1's frozen API; P1 never calls P2's.** Nobody waits on a
+signature, and no file has two owners.
+
+```
+P1  combat · effects · loot · HUD        P2  spells · npc · inventory
+     owns the damage layer                    owns the casting layer
+              ▲                                        │
+              └──────── calls (frozen in M0) ──────────┘
+```
+
+| | P1 — hits and consequences | P2 — casting and economy |
+|---|---|---|
+| Server | `combat.js`, `effects.js`, `loot.js` | `spells.js`, `npc.js`, `inventory.js` |
+| Client | the same three, plus `ui/hud.js` | the same three |
+| Shared | `rewards.js`, `effects.js` | `spells.js`, `gear.js` |
+| Tasks | A1–A5, C4, C5, C6 | B1–B5, C1–C3 |
+
+`loot` stays with P1 because everything it calls — `onKill`, `heal`,
+`applyEffect` — is P1's. Mob drops come from `loot`'s own `onKill` listener,
+which fires for every victim kind, so **`npc` never imports `loot`**.
+
+### Order
+
+Both start on day one; neither is ever blocked.
+
+| Sprint | P1 | P2 |
+|---|---|---|
+| 1 | **A3 — `combat` server.** The unblocker: providers, pipeline, melee, death, respawn. Enable it as soon as a hit lands | **C2 + C3 — `inventory`.** Needs only `profile`, which is already live, so it is testable end to end on day one |
+| 2 | A1 `effects` server — the definition/instance split (§3.3) and the four stacking policies are the whole task | B2 — `spells` server executor, against a real `combat` |
+| 3 | A4 kill rewards and feed, A2 `effects` client | B3 `spells` client, then B4 `npc` server |
+| 4 | A5 `combat` client, C4 + C5 `loot`, C6 HUD readouts | B5 `npc` client |
+
+P2's sprint 1 is deliberately the one piece of Lane C that touches nothing of
+P1's — it buys P1 the day it needs to land `combat` without anyone idling.
+
+### The four rules that keep it clean
+
+1. **Flip only your own `enabled`.** Both registries already list every
+   system; the only edit either of you makes is `false → true` in your own
+   file, when your server half works.
+2. **`ui/hud.js` belongs to P1.** P2 shows gold inside the shop modal it owns.
+   Anyone else who needs a readout goes through `ctx.hud.setStats`, never the
+   HUD's elements. This is the one file that could have had two owners.
+3. **Nobody edits `styles.css`.** Inject your styles from your own module, the
+   way `client/src/systems/profile.js` already does.
+4. **A frozen signature changes only by agreement.** If P2 needs a different
+   shape from `combat`, that is a conversation, not a commit — every no-op in
+   M0 is a promise P2 already built against.
+
+### Known gap for P2
+
+`MOB_TYPES` in `server/systems/npc.js` references `stoneSlam`, `fireBreath`,
+`spark` and `hex`, which do not exist in `shared/spells.js` — `ARENA.md` never
+specified them. Defining them is the first half of B4. They are ordinary rows
+with `cls: 'npc'`, which is the whole point of mobs casting through the same
+executor.
 
 ### Why M0 has to land first
 

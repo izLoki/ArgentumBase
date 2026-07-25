@@ -21,8 +21,8 @@
 /** Client -> Server */
 export const C2S = {
   // --- core ---
-  JOIN: 'core:join', // { name: string, cls: 'warrior'|'mage'|'archer' }
-  MOVE: 'core:move', // { dir: 0|1|2|3 }
+  JOIN: 'core:join', // { name: string, cls: 'warrior'|'mage'|'hunter' }
+  MOVE: 'core:move', // { dir: 0|1|2|3, seq: number } one predicted step, already taken locally
   FACE: 'core:face', // { dir: 0|1|2|3 }
   PING: 'core:ping', // { t: number }
 
@@ -30,7 +30,18 @@ export const C2S = {
   CHAT_SAY: 'chat:say', // { text: string }
 
   // --- profile ---
-  PROFILE_SPEND_POINT: 'profile:spendPoint', // { attr: 'str'|'agi'|'int'|'con' }
+  // (none: attributes are derived from class and level, so there is nothing
+  //  for a client to ask this system to change)
+
+  // --- combat ---
+  COMBAT_ATTACK: 'combat:attack', // {} melee in the facing direction
+  COMBAT_RESPAWN: 'combat:respawn', // {} early respawn once the timer allows
+
+  // --- spells ---
+  SPELL_CAST: 'spells:cast', // { id, tx?, ty?, dir? }
+
+  // --- inventory ---
+  INVENTORY_BUY: 'inventory:buy', // { slot: 'weapon'|'armor'|'focus'|'boots' }
 
   // --- add your system's events below, in their own block ---
 }
@@ -38,7 +49,7 @@ export const C2S = {
 /** Server -> Client */
 export const S2C = {
   // --- core ---
-  WELCOME: 'core:welcome', // { selfId, self, map: {w,h,tiles}, systems }
+  WELCOME: 'core:welcome', // { selfId, self, map: {w,h,block,rle}, systems }
   SNAPSHOT: 'core:snapshot', // { t, tick, players: PlayerView[], ext: {} }
   ERROR: 'core:error', // { code, message }
   PONG: 'core:pong', // { t }
@@ -47,8 +58,32 @@ export const S2C = {
   CHAT_MSG: 'chat:msg', // { from, fromId, text, channel: 'say'|'system' }
 
   // --- profile ---
-  PROFILE_SELF: 'profile:self', // { profile, stats, vitals } — owner only, never broadcast
+  PROFILE_SELF: 'profile:self', // { profile, stats } — owner only, never broadcast
   PROFILE_LEVEL_UP: 'profile:levelUp', // { id, level }
+
+  // --- combat ---
+  COMBAT_HIT: 'combat:hit', // { x, y, kind, id, amount, crit, school, byId }
+  COMBAT_DEATH: 'combat:death', // { kind, id, name, killerId, killerName }
+  COMBAT_RESPAWNED: 'combat:respawned', // { id, x, y, protectedMs }
+  COMBAT_KILLFEED: 'combat:killfeed', // { killerName, victimName, victimKind, reward:{exp,coins} }
+
+  // --- effects ---
+  EFFECTS_SELF: 'effects:self', // owner only { active: [{ id, endsAt, stacks }] }
+
+  // --- spells ---
+  SPELL_BOOK: 'spells:book', // owner only { known: [{ id, slot, unlocked }] }
+  SPELL_COOLDOWN: 'spells:cooldown', // owner only { id, untilMs }
+  SPELL_CAST_FX: 'spells:castFx', // { casterKind, casterId, id, x0, y0, tx, ty, dir, projId? }
+  SPELL_RAY: 'spells:ray', // { id, x0, y0, x1, y1 }
+  SPELL_IMPACT: 'spells:impact', // { id, x, y, radius }
+  SPELL_FAILED: 'spells:failed', // owner only { id, reason }
+
+  // --- inventory ---
+  INVENTORY_SELF: 'inventory:self', // owner only { tiers, nextCosts }
+
+  // --- loot ---
+  LOOT_PICKED: 'loot:picked', // { id, byId, type }
+  LOOT_EXPLODE: 'loot:explode', // { id, x, y, radius }
 
   // --- add your system's events below, in their own block ---
 }
@@ -69,6 +104,7 @@ export const S2C = {
  * @property {number} hp
  * @property {number} maxHp
  * @property {boolean} dead
+ * @property {number} seq  last input the core acknowledged, for client prediction
  */
 
 export const ERROR_CODE = {

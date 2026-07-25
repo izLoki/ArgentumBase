@@ -19,13 +19,15 @@
  */
 
 import profile from './profile.js'
+import effects from './effects.js'
 import combat from './combat.js'
+import spells from './spells.js'
 import npc from './npc.js'
 import inventory from './inventory.js'
-import spells from './spells.js'
+import loot from './loot.js'
 
 /** `profile` first: other systems read the local profile from it. */
-export const clientSystems = [profile, combat, npc, inventory, spells]
+export const clientSystems = [profile, effects, combat, spells, npc, inventory, loot]
 
 const isLive = (ctx, system) => ctx.state.systems[system.id] === true
 

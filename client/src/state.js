@@ -1,10 +1,13 @@
 /**
  * Local mirror of the server state.
  *
- * The server owns the truth; the client only interpolates so movement looks
- * smooth. Never write authoritative values here from a system — send an
- * intent over the network instead.
+ * The server owns the truth. The client interpolates so movement looks smooth,
+ * and predicts its own steps so walking does not wait for a round trip — that
+ * prediction lives in `movement.js` and is always corrected from here. Never
+ * write authoritative values from a system: send an intent over the network.
  */
+
+import { decodeTiles } from '@shared/grid.js'
 
 export const state = {
   selfId: null,
@@ -21,6 +24,20 @@ export const state = {
 
 export function self() {
   return state.players.get(state.selfId) ?? null
+}
+
+/**
+ * Expands the run-length encoded map from WELCOME. Throws on a malformed
+ * payload rather than leaving the client walking around a half built world.
+ */
+export function setMap(wire) {
+  state.map = {
+    w: wire.w,
+    h: wire.h,
+    block: wire.block,
+    tiles: decodeTiles(wire.rle, wire.w * wire.h),
+  }
+  return state.map
 }
 
 /** Applies a server snapshot onto the local mirror. */

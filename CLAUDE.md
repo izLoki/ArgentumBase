@@ -133,6 +133,7 @@ Server (`server/game/context.js`):
 | `ctx.fail(player, code, msg)` | typed error to the caller |
 | `ctx.announce(text)` | system message in chat |
 | `ctx.map`, `ctx.tileAt`, `ctx.isWalkable`, `ctx.SPAWN` | world queries |
+| `ctx.canStand(x, y)`, `ctx.findFreeTile(x, y)` | whether a whole body fits, and where the nearest spot is |
 | `ctx.log(...)` | prefixed logging |
 
 Client (built in `client/src/main.js`):
@@ -141,12 +142,56 @@ Client (built in `client/src/main.js`):
 |---|---|
 | `ctx.app`, `ctx.layers` | Pixi application and draw layers |
 | `ctx.state`, `ctx.self()` | local mirror of the world |
+| `ctx.movement.selfTile()` | where the local player actually is — predicted, one round trip ahead of `self()` |
 | `ctx.net` | `send` / `on` |
-| `ctx.action({id, label, key, onPress})` | one binding, keyboard **and** thumb button |
+| `ctx.action({id, label, key, slot, onPress})` | one binding, keyboard **and** thumb button. `slot: 'rail'` (default, bottom-right thumb rail) or `'utility'` (top-right column, for panels and toggles) |
 | `ctx.input.onKey(code, fn)` | keyboard-only binding (desktop-only features) |
 | `ctx.viewport` | `isTouch`, `isMobile`, `isPortrait`, `zoom`, `onChange(fn)` |
-| `ctx.touch` | `addButton` / `removeButton` when `action()` is not enough |
+| `ctx.touch` | `addButton` / `removeButton` / `buttonOf(id)` when `action()` is not enough |
 | `ctx.hud`, `ctx.chat` | HUD updates and message output |
+
+## The player profile
+
+Anything about *who a player is* — level, exp, gold, attributes and the stats
+derived from them — belongs to the `profile` system, not to your own state.
+Inventory, combat, stats panels and data features all read the same numbers
+from it instead of each keeping a copy.
+
+- Shape and formulas: `shared/profile.js` (pure data, imported by both sides).
+- Server: `server/systems/profile.js` owns it.
+- Client: `client/src/systems/profile.js` mirrors it, plus the 👤 panel (`P`).
+
+Server, from your own system:
+
+```js
+import { profileOf, statsOf, addExp, addGold, spendGold, setModifier } from './profile.js'
+
+const stats = statsOf(player)          // { maxHp, damage, defense, evasion, spellPower, cdr }
+addExp(ctx, player, 40)                // levels up and announces on its own
+if (!spendGold(ctx, player, 25)) return ctx.fail(player, 'BAD_PAYLOAD', 'not enough gold')
+```
+
+Never write `level`, `gold` or a stat by hand. To contribute bonuses (gear, a
+buff) register a modifier under your system id — the profile folds it into the
+derived stats and recomputes:
+
+```js
+setModifier(ctx, player, 'inventory', { damage: 4, defense: 2 })
+clearModifier(ctx, player, 'inventory')
+```
+
+Need to carry your own data with the profile? Use your own key,
+`profile.ext.<yourId> = {...}`, then `markDirty(player)`.
+
+Client:
+
+```js
+import { myProfile, myStats, profileOf, onProfileChange } from './profile.js'
+```
+
+`snapshot.ext.profile` carries only the public part (`id, name, cls, level`).
+Gold, exp and attributes are private and pushed to their owner alone over
+`S2C.PROFILE_SELF` — do not republish them.
 
 ## Mobile is not optional
 
@@ -158,8 +203,8 @@ keyboard is an unfinished feature, so build both halves in the same pass.
 ```
 ┌──────────────────────────────────────────────┐
 │ stats                            debug   💬  │  top strip: HUD readouts
-│ chat log                                     │
-│                                              │
+│ chat log                                 🛒  │  utility column (top right)
+│                                          👤  │
 │                                              │
 │   ← stick zone (46% × 62%) →      [action]   │  bottom-left: movement
 │                                   [ rail  ]  │  bottom-right: actions
@@ -175,9 +220,17 @@ keyboard is an unfinished feature, so build both halves in the same pass.
    That is one keyboard binding plus one button in the action rail. Reserve
    `ctx.input.onKey` for things a phone genuinely cannot do.
 
-2. **Never place UI over `#stick-zone` or `#actions`.** The bottom-left
-   quadrant and the bottom-right corner are reserved. Panels go top-left,
-   top-right, or centred as a modal.
+   Pick the slot by *when* the button is pressed. Things used mid-fight stay
+   on the thumb rail; panels and toggles go to the utility column, so the rail
+   does not fill up with things nobody presses under pressure:
+
+   ```js
+   ctx.action({ id: 'shop', label: '🛒', key: 'KeyB', slot: 'utility', onPress: ... })
+   ```
+
+2. **Never place UI over `#stick-zone`, `#actions` or `#actions-utility`.**
+   The bottom-left quadrant, the bottom-right corner and the top-right column
+   are reserved. Panels go top-left, or centred as a modal.
 
 3. **Anchor to the safe-area variables**, not to raw pixels — notches and
    rounded corners eat the edges:
@@ -224,13 +277,65 @@ without a device.
    events answer `NOT_IMPLEMENTED` and nothing else runs. Half-finished work
    can be merged without breaking the world.
 
+## Tiles, blocks and distances
+
+The grid is fine and invisible. **A tile is a movement step, not a terrain
+feature**: 8 px, four of which make one **block** — the 32 px square terrain is
+actually built from. Maps are designed in blocks and expanded into tiles, so a
+tree still looks like a tree while walking gained four times the resolution.
+
+Two units, and mixing them up is the easiest bug to write here:
+
+| Unit | What uses it |
+|---|---|
+| **tile** | every coordinate: `player.x`, `tx/ty`, anything compared against the map |
+| **block** | every gameplay distance in a data table: spell `range`, `radius`, mob `aggro`, spawn distances |
+
+Convert where a range meets a coordinate, never in the table:
+
+```js
+import { blocksToTiles } from '@shared/constants.js'
+const reach = blocksToTiles(def.range) // 8 blocks -> 32 tiles
+```
+
+Bodies are wider than a tile (`PLAYER_RADIUS`), so a position is only valid
+when the **whole footprint** fits. Use `ctx.canStand(x, y)` — not
+`ctx.isWalkable`, which answers for a single tile — and `ctx.findFreeTile` to
+place anything. Two entities collide when their footprints overlap
+(`bodiesOverlap` in `shared/grid.js`).
+
+When you design terrain, work in blocks. A one tile wide gap is 8 px and
+nothing fits through it.
+
+## Movement is predicted
+
+Walking does not wait for the server. The client applies the step immediately,
+tags it with a sequence number and sends it; the server re-runs the same rules
+and every snapshot carries back the last sequence it processed, so
+`client/src/movement.js` can replay whatever is still unacknowledged on top of
+the server's position. On a server hosted far away this is the difference
+between a game and a slideshow.
+
+This does not weaken the server's authority — it still decides, and its verdict
+lands on the next snapshot. What it does require:
+
+- **The rules both sides run live in `shared/grid.js`.** Never copy a movement
+  rule into the client; a divergence shows up as rubber-banding.
+- **Read the local player's position from `ctx.movement.selfTile()`**, not from
+  `ctx.self().x`. The first is where the player sees themselves, the second is
+  up to one round trip behind.
+- A system that blocks movement (`registerMoveGate`, a new blocker) is invisible
+  to the prediction and corrects with a small snap. That is fine for something
+  occasional like a root; it is not a place to put a rule that fires constantly.
+
 ## Architecture invariants
 
 - **The server is authoritative.** The client sends intents; the server
-  decides outcomes. Never compute damage, validate collisions, or apply
-  position changes on the client.
-- **Snapshots are full state**, sent 15 times per second. The client only
-  interpolates for smoothness.
+  decides outcomes. Never compute damage or validate a hit on the client. The
+  one exception is the local player's own movement, which is predicted and then
+  corrected — see above.
+- **Snapshots are full state**, sent 15 times per second. The client
+  interpolates for smoothness and predicts its own steps.
 - **The world lives in memory.** There is no database and none is needed.
 - **No assets.** Everything is drawn with Pixi primitives. Replacing that with
   a real tileset should only touch `client/src/render/`.

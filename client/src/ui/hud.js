@@ -3,10 +3,15 @@
  *
  * DOM instead of Pixi on purpose — UI work and render work stay in separate
  * files, so two people can touch them without conflicting.
+ *
+ * There is no mana in this world, so the second bar is experience. HP comes
+ * from the snapshot every frame; experience and level are private and pushed
+ * here by the `profile` system through `setStats`.
  */
 
 import { state, self } from '../state.js'
 import { net } from '../net.js'
+import { movement } from '../movement.js'
 
 let els = null
 
@@ -16,24 +21,31 @@ export const hud = {
     els = {
       hpFill: document.getElementById('hp-fill'),
       hpText: document.getElementById('hp-text'),
-      mpFill: document.getElementById('mp-fill'),
-      mpText: document.getElementById('mp-text'),
+      xpFill: document.getElementById('xp-fill'),
+      xpText: document.getElementById('xp-text'),
       name: document.getElementById('hud-name'),
+      level: document.getElementById('hud-level'),
       debug: document.getElementById('debug'),
     }
   },
 
-  /** Systems can push authoritative stat updates here. */
-  setStats({ hp, maxHp, mana, maxMana }) {
+  /**
+   * Systems push authoritative readouts here rather than reaching into the
+   * HUD's elements — that is what keeps `combat` and `profile` off each
+   * other's toes.
+   */
+  setStats({ hp, maxHp, exp, expToNext, level } = {}) {
     if (!els) return
     if (hp !== undefined) {
       els.hpFill.style.transform = `scaleX(${maxHp ? hp / maxHp : 0})`
       els.hpText.textContent = `${hp}/${maxHp}`
     }
-    if (mana !== undefined) {
-      els.mpFill.style.transform = `scaleX(${maxMana ? mana / maxMana : 0})`
-      els.mpText.textContent = `${mana}/${maxMana}`
+    if (exp !== undefined) {
+      const ratio = expToNext > 0 ? Math.min(1, exp / expToNext) : 1
+      els.xpFill.style.transform = `scaleX(${ratio})`
+      els.xpText.textContent = expToNext > 0 ? `${exp}/${expToNext} xp` : 'max'
     }
+    if (level !== undefined) els.level.textContent = `Lv ${level}`
   },
 
   update() {
@@ -42,6 +54,10 @@ export const hud = {
     els.name.textContent = me.name
     els.hpFill.style.transform = `scaleX(${me.maxHp ? me.hp / me.maxHp : 0})`
     els.hpText.textContent = `${me.hp}/${me.maxHp}`
-    els.debug.textContent = `tile ${me.x},${me.y} · tick ${state.serverTick} · ping ${net.latency}ms · ${state.players.size} online`
+    // The predicted tile is the one on screen. When it disagrees with the
+    // server's, that gap IS the bug worth seeing, so show both.
+    const at = movement.selfTile() ?? me
+    const drift = at.x !== me.x || at.y !== me.y ? ` (server ${me.x},${me.y})` : ''
+    els.debug.textContent = `tile ${at.x},${at.y}${drift} · tick ${state.serverTick} · ping ${net.latency}ms · ${state.players.size} online`
   },
 }

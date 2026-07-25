@@ -18,20 +18,18 @@
  * exp and attributes are private and pushed to their owner alone.
  */
 
-import { C2S, S2C, ERROR_CODE } from '../../shared/protocol.js'
+import { S2C } from '../../shared/protocol.js'
+import { MOVE_COOLDOWN_MS } from '../../shared/constants.js'
 import {
-  ATTRIBUTES,
   LEVEL_MAX,
-  POINTS_PER_LEVEL,
+  MOVE_MAX_PCT,
+  attributesForLevel,
   createProfile,
   deriveStats,
   expForLevel,
   pickStats,
   toPublicProfile,
 } from '../../shared/profile.js'
-
-/** Free points on join, so the demo has something to spend on the spot. */
-const STARTING_POINTS = 5
 
 export default {
   id: 'profile',
@@ -50,11 +48,9 @@ export default {
       stats: null,
       dirty: true,
     }
-    player.ext.profile.data.points = STARTING_POINTS
 
     recompute(ctx, player)
     player.hp = player.maxHp
-    player.mana = player.maxMana
   },
 
   /** Private data cannot ride the snapshot, so it is pushed to its owner. */
@@ -76,24 +72,9 @@ export default {
     return out
   },
 
-  handlers: {
-    [C2S.PROFILE_SPEND_POINT](ctx, player, payload) {
-      const attr = payload?.attr
-      if (!ATTRIBUTES.includes(attr)) {
-        return ctx.fail(player, ERROR_CODE.BAD_PAYLOAD, 'unknown attribute')
-      }
-
-      const profile = profileOf(player)
-      if (!profile) return
-      if (profile.points <= 0) {
-        return ctx.fail(player, ERROR_CODE.BAD_PAYLOAD, 'no attribute points left')
-      }
-
-      profile.attributes[attr] += 1
-      profile.points -= 1
-      recompute(ctx, player)
-    },
-  },
+  // No handlers: attributes are derived from class and level, so there is
+  // nothing a client can ask this system to change.
+  handlers: {},
 }
 
 /* ---------- API for other systems ---------- */
@@ -119,7 +100,6 @@ export function addExp(ctx, player, amount) {
   while (profile.level < LEVEL_MAX && profile.exp >= profile.expToNext) {
     profile.exp -= profile.expToNext
     profile.level += 1
-    profile.points += POINTS_PER_LEVEL
     profile.expToNext = expForLevel(profile.level)
     gained += 1
   }
@@ -183,24 +163,31 @@ export function markDirty(player) {
 function recompute(ctx, player) {
   const slot = player.ext.profile
   if (!slot) return
+
+  // Attributes are derived, not stored: a level is the only input. Nothing can
+  // desync them, so there is no repair path to write.
+  slot.data.attributes = attributesForLevel(slot.data.cls, slot.data.level)
+
   slot.stats = deriveStats(slot.data, [...slot.modifiers.values()])
   applyVitals(player, slot.stats)
   slot.dirty = true
 }
 
-/** The profile owns the ceilings; the core keeps the current values. */
+/**
+ * The profile owns the ceilings; `combat` owns the current hp. Clamping down
+ * is the one exception — a shrinking maxHp must not leave hp above it.
+ */
 function applyVitals(player, stats) {
   player.maxHp = stats.maxHp
-  player.maxMana = stats.maxMana
   player.hp = Math.min(player.hp, player.maxHp)
-  player.mana = Math.min(player.mana, player.maxMana)
+
+  // Agility has to actually make you faster. The core MOVE handler reads this
+  // instead of the constant; the client mirrors it so prediction agrees.
+  const pct = Math.min(MOVE_MAX_PCT, stats.moveSpeed ?? 0)
+  player.moveCooldownMs = Math.round(MOVE_COOLDOWN_MS * (1 - pct / 100))
 }
 
 function privatePacket(player) {
   const slot = player.ext.profile
-  return {
-    profile: slot.data,
-    stats: slot.stats,
-    vitals: { mana: player.mana, maxMana: player.maxMana },
-  }
+  return { profile: slot.data, stats: slot.stats }
 }

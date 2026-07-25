@@ -5,7 +5,8 @@
  * `player.ext[systemId]` (per player) so this file rarely needs to change.
  */
 
-import { PLAYER_DEFAULTS, DIR, CLASSES } from '../../shared/constants.js'
+import { PLAYER_DEFAULTS, DIR, CLASSES, MOVE_BURST_TILES } from '../../shared/constants.js'
+import { bodiesOverlap } from '../../shared/grid.js'
 import { SPAWN, findFreeTile } from '../world/map.js'
 
 export const world = {
@@ -27,15 +28,18 @@ export const world = {
  * @property {number} dir
  * @property {number} hp
  * @property {number} maxHp
- * @property {number} mana
- * @property {number} maxMana
  * @property {boolean} dead
  * @property {number} lastMoveAt
+ * @property {number} seq          last input sequence the core processed
+ * @property {number} moveTokens   banked steps, see MOVE_BURST_TILES
  * @property {Object} ext  per-system scratch space
  */
 
 /** @type {Array<(x:number,y:number,exceptId:string|null)=>boolean>} */
 const blockers = []
+
+/** @type {Array<(player:Player)=>boolean>} */
+const moveGates = []
 
 /**
  * Lets a system declare that its entities occupy tiles, without touching the
@@ -45,10 +49,38 @@ export function registerBlocker(fn) {
   blockers.push(fn)
 }
 
+/**
+ * Lets a system veto a player's step — `rooted`, `stunned`, frozen in place.
+ * Return `false` to block. Call it from your `init(ctx)`:
+ *
+ *   registerMoveGate((player) => !hasFlag(player, 'rooted'))
+ *
+ * Facing is deliberately not gated: turning stays free so a rooted player can
+ * still aim.
+ */
+export function registerMoveGate(fn) {
+  moveGates.push(fn)
+}
+
+/** True when every registered gate allows this player to step. */
+export function canMove(player) {
+  for (const fn of moveGates) {
+    if (fn(player) === false) return false
+  }
+  return true
+}
+
+/**
+ * True when a body centred on (x, y) would overlap another one.
+ *
+ * A body is `PLAYER_RADIUS` tiles wide in every direction, not a single tile:
+ * on the fine grid two players standing one tile apart would be drawn on top of
+ * each other.
+ */
 export function isTileOccupied(x, y, exceptId = null) {
   for (const p of world.players.values()) {
     if (p.id === exceptId || p.dead) continue
-    if (p.x === x && p.y === y) return true
+    if (bodiesOverlap(p.x, p.y, x, y)) return true
   }
   for (const fn of blockers) {
     if (fn(x, y, exceptId)) return true
@@ -70,10 +102,13 @@ export function createPlayer(id, name, cls) {
     dir: DIR.DOWN,
     hp: PLAYER_DEFAULTS.hp,
     maxHp: PLAYER_DEFAULTS.maxHp,
-    mana: PLAYER_DEFAULTS.mana,
-    maxMana: PLAYER_DEFAULTS.maxMana,
     dead: false,
     lastMoveAt: 0,
+    /** Last input sequence the core processed. Echoed back so the client reconciles. */
+    seq: 0,
+    /** Step budget: see MOVE_BURST_TILES. Owned by the core movement handler. */
+    moveTokens: MOVE_BURST_TILES,
+    moveTokensAt: Date.now(),
     ext: Object.create(null),
   }
 
@@ -91,9 +126,10 @@ export function getPlayer(id) {
   return world.players.get(id)
 }
 
+/** The living player whose body covers a tile, or null. */
 export function playerAt(x, y) {
   for (const p of world.players.values()) {
-    if (!p.dead && p.x === x && p.y === y) return p
+    if (!p.dead && bodiesOverlap(p.x, p.y, x, y, undefined, 0)) return p
   }
   return null
 }
@@ -110,5 +146,8 @@ export function toPlayerView(p) {
     hp: p.hp,
     maxHp: p.maxHp,
     dead: p.dead,
+    // The client replays every input the server has not acknowledged yet.
+    // Without this it cannot tell which of its predicted steps already landed.
+    seq: p.seq,
   }
 }

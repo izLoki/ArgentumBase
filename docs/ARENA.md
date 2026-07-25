@@ -407,6 +407,13 @@ genuinely needs the table — icons, cooldowns, ranges, unlock levels, the
 cooldown sweep maths — so duplicating it would drift. The client never
 executes `actions`; the server is the only place that resolves them.
 
+> **Distances in this document are in BLOCKS.** A block is the 32 px square
+> terrain is built from; coordinates are in tiles, four times finer. Every
+> `range`, `radius`, `width`, `aggro` and `speedTps` below reads in blocks and
+> goes through `blocksToTiles()` the moment it meets a coordinate. Skipping
+> that conversion makes every number a quarter of its intended reach — see
+> "Tiles, blocks and distances" in CLAUDE.md.
+
 ```js
 export const SPELLS = {
   fireball: {
@@ -415,8 +422,8 @@ export const SPELLS = {
     cooldownMs: 2400,         // reduced globally by cdr — no per-spell cooldown scaling
 
     targeting: 'projectile',  // 'melee'|'self'|'tile'|'ray'|'aoe'|'projectile'|'dash'
-    range: 8, radius: 1,
-    speedTps: 9,              // tiles per second, projectiles only
+    range: 8, radius: 1,      // BLOCKS — blocksToTiles() before touching coords
+    speedTps: 9,              // blocks per second, projectiles only
     pierce: false, stopsOnTerrain: true, requiresLos: true,
 
     fx: { color: 0xff7a3c, shape: 'orb', trail: true, impact: 'burst' },

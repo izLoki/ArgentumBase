@@ -7,6 +7,8 @@
  */
 
 import { io } from 'socket.io-client'
+import { MAP_WIDTH, MAP_HEIGHT, MOVE_BURST_TILES, MOVE_COOLDOWN_MS } from '../shared/constants.js'
+import { decodeTiles } from '../shared/grid.js'
 
 const URL = process.env.SMOKE_URL ?? 'http://localhost:3000'
 
@@ -15,7 +17,6 @@ const C2S = {
   MOVE: 'core:move',
   FACE: 'core:face',
   CHAT_SAY: 'chat:say',
-  PROFILE_SPEND_POINT: 'profile:spendPoint',
 }
 const S2C = {
   WELCOME: 'core:welcome',
@@ -38,39 +39,59 @@ let snapshot = null
 let chatSeenByB = false
 let profile = null
 let lastError = null
+/** Bob is a hunter: his agility has to buy him more speed than Alice's. */
+let bMoveSpeed = null
 
 a.on('connect', () => a.emit(C2S.JOIN, { name: 'Alice', cls: 'warrior' }))
-b.on('connect', () => b.emit(C2S.JOIN, { name: 'Bob', cls: 'mage' }))
+b.on('connect', () => b.emit(C2S.JOIN, { name: 'Bob', cls: 'hunter' }))
 
 a.on(S2C.WELCOME, (w) => { welcome = w })
 a.on(S2C.SNAPSHOT, (s) => { snapshot = s })
 a.on(S2C.PROFILE_SELF, (p) => { profile = p })
 a.on(S2C.ERROR, (e) => { lastError = e })
 b.on(S2C.CHAT, (m) => { if (m.text === 'hello world') chatSeenByB = true })
+b.on(S2C.PROFILE_SELF, (p) => { bMoveSpeed = p?.stats?.moveSpeed })
 
 await wait(1000)
 
 const selfOf = () => snapshot.players.find((p) => p.id === welcome.selfId)
 
 check('welcome received', !!welcome)
-check('map delivered', welcome?.map?.tiles?.length === 64 * 48, `len=${welcome?.map?.tiles?.length}`)
 check('system flags present', welcome?.systems?.core === true)
 check('two players in snapshot', snapshot?.players?.length === 2, `n=${snapshot?.players?.length}`)
 
+// The map travels run-length encoded: 49k tiles as raw JSON would be ~96 KB.
+let decoded = null
+try {
+  decoded = decodeTiles(welcome.map.rle, welcome.map.w * welcome.map.h)
+} catch (err) {
+  lastError = err
+}
+check('map delivered', decoded?.length === MAP_WIDTH * MAP_HEIGHT, `len=${decoded?.length}`)
+check('map is compact on the wire', JSON.stringify(welcome?.map ?? {}).length < 40_000,
+  `${(JSON.stringify(welcome?.map ?? {}).length / 1024).toFixed(1)} KB`)
+
+// --- movement: the client predicts, the server confirms with `seq` ---
+let seq = 0
 const before = selfOf()
 for (let i = 0; i < 5; i++) {
-  a.emit(C2S.MOVE, { dir: 2 }) // right
-  await wait(180)
+  a.emit(C2S.MOVE, { dir: 2, seq: ++seq }) // right
+  await wait(MOVE_COOLDOWN_MS + 10)
 }
 await wait(200)
 const after = selfOf()
 check('movement applied', after.x > before.x, `${before.x},${before.y} -> ${after.x},${after.y}`)
+check('input sequence acknowledged', after.seq === seq, `ack=${after.seq} sent=${seq}`)
 
 const preSpam = { ...after }
-for (let i = 0; i < 20; i++) a.emit(C2S.MOVE, { dir: 1 }) // spam left
+for (let i = 0; i < 40; i++) a.emit(C2S.MOVE, { dir: 1, seq: ++seq }) // spam left
 await wait(250)
 const postSpam = selfOf()
-check('move cooldown enforced', Math.abs(postSpam.x - preSpam.x) <= 1, `dx=${postSpam.x - preSpam.x}`)
+// A burst is absorbed, not obeyed: the bucket caps how far a spammer gets.
+check('move budget enforced', Math.abs(postSpam.x - preSpam.x) <= MOVE_BURST_TILES + 2,
+  `dx=${postSpam.x - preSpam.x}`)
+check('rejected input still acknowledged', postSpam.seq === seq,
+  `ack=${postSpam.seq} sent=${seq}`)
 
 a.emit(C2S.FACE, { dir: 3 })
 await wait(200)
@@ -89,18 +110,39 @@ check('derived stats present', typeof profile?.stats?.maxHp === 'number', JSON.s
 check('player vitals follow the profile', selfOf().maxHp === profile?.stats?.maxHp,
   `${selfOf().maxHp} vs ${profile?.stats?.maxHp}`)
 
-const beforeSpend = { con: profile.profile.attributes.con, maxHp: profile.stats.maxHp }
-a.emit(C2S.PROFILE_SPEND_POINT, { attr: 'con' })
-await wait(250)
-check('attribute point spent', profile.profile.attributes.con === beforeSpend.con + 1,
-  `con=${profile.profile.attributes.con}`)
-check('stats recomputed after spending', profile.stats.maxHp > beforeSpend.maxHp,
-  `${beforeSpend.maxHp} -> ${profile.stats.maxHp}`)
+// --- arena foundation: no mana, int -> cdr, agi -> moveSpeed ---
+check('mana is gone from the derived stats', profile?.stats?.maxMana === undefined,
+  JSON.stringify(profile?.stats))
+check('spell power is gone from the derived stats', profile?.stats?.spellPower === undefined,
+  JSON.stringify(profile?.stats))
+check('cdr derived and capped', profile?.stats?.cdr >= 0 && profile?.stats?.cdr <= 50,
+  `cdr=${profile?.stats?.cdr}`)
+check('moveSpeed derived and capped', profile?.stats?.moveSpeed >= 0 && profile?.stats?.moveSpeed <= 40,
+  `moveSpeed=${profile?.stats?.moveSpeed}`)
+check('damage is gear-and-effects only', profile?.stats?.damage === 0,
+  `damage=${profile?.stats?.damage}`)
 
-lastError = null
-a.emit(C2S.PROFILE_SPEND_POINT, { attr: 'nonsense' })
-await wait(200)
-check('unknown attribute rejected', lastError?.code === 'BAD_PAYLOAD', JSON.stringify(lastError))
+// Attributes are a pure function of class and level: nothing to spend, and a
+// warrior's level 1 block is exactly what the shared table says.
+check('manual point spending is gone', profile?.profile?.points === undefined,
+  `points=${profile?.profile?.points}`)
+check('attributes derived from class and level',
+  JSON.stringify(profile?.profile?.attributes) === JSON.stringify({ str: 20, agi: 12, int: 8, con: 25 }),
+  JSON.stringify(profile?.profile?.attributes))
+check('level cap is 20', profile?.profile?.level === 1 && typeof profile?.profile?.expToNext === 'number',
+  `expToNext=${profile?.profile?.expToNext}`)
+
+// A hunter must visibly outwalk a warrior — the cheapest proof the whole
+// attribute -> stat -> core-handler chain landed.
+check('hunter walks faster than warrior', bMoveSpeed > profile?.stats?.moveSpeed,
+  `hunter=${bMoveSpeed} vs warrior=${profile?.stats?.moveSpeed}`)
+
+// --- the six arena systems exist and are all still disabled ---
+const arenaSystems = ['combat', 'effects', 'spells', 'npc', 'inventory', 'loot']
+const declared = arenaSystems.filter((id) => id in (welcome?.systems ?? {}))
+check('six arena systems declared', declared.length === 6, declared.join(','))
+check('arena systems still disabled', arenaSystems.every((id) => welcome?.systems?.[id] === false),
+  JSON.stringify(welcome?.systems))
 
 b.close()
 await wait(400)

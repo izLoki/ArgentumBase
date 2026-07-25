@@ -6,10 +6,13 @@
  * whole client agrees on what "mobile" means.
  */
 
-import { TILE_SIZE } from '@shared/constants.js'
+import { BLOCK_PX } from '@shared/constants.js'
 
-/** Vertical tiles we try to keep on screen on a phone. */
-const TARGET_TILES_V = 12
+/**
+ * Vertical BLOCKS we try to keep on screen on a phone. Blocks, not tiles: a
+ * tile is 8 px and framing the world by it would zoom into nothing.
+ */
+const TARGET_BLOCKS_V = 12
 const MAX_ZOOM = 2
 /** Short-edge size, in CSS px, below which a touch device counts as a phone. */
 const SMALL_EDGE_PX = 820
@@ -84,7 +87,7 @@ function sync() {
   document.body.classList.toggle('portrait', viewport.isPortrait)
 
   zoom = viewport.isMobile
-    ? Math.min(MAX_ZOOM, Math.max(1, window.innerHeight / (TARGET_TILES_V * TILE_SIZE)))
+    ? Math.min(MAX_ZOOM, Math.max(1, window.innerHeight / (TARGET_BLOCKS_V * BLOCK_PX)))
     : 1
 
   setVar('--app-h', `${window.innerHeight}px`)
