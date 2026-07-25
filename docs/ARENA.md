@@ -296,10 +296,13 @@ export const SPELLS = {
   },
 }
 
+// Slot order is a fixed role convention, the same for every class:
+//   [0] mobility spell   [1] special attack (higher cooldown)   [2] third basic
+//   [3] unlocks at level 10                [4] unlocks at level 20
 export const CLASS_SPELLS = {
-  mage:    ['fireball', 'lightningRay', 'blink', 'frostNova', 'iceBlock'],
-  warrior: ['cleave', 'charge', 'warCry', 'shieldWall', 'whirlwind'],
-  hunter:  ['piercingShot', 'trap', 'huntersMark', 'roll', 'volley'],
+  mage:    ['blink', 'fireball', 'lightningRay', 'frostNova', 'iceBlock'],
+  warrior: ['charge', 'cleave', 'warCry', 'shieldWall', 'whirlwind'],
+  hunter:  ['roll', 'piercingShot', 'huntersMark', 'trap', 'volley'],
 }
 export const UNLOCK_LEVELS = [1, 1, 1, 10, 20]  // by slot index
 
@@ -358,45 +361,57 @@ up it compares `profile.level` against `UNLOCK_LEVELS` and pushes newly
 unlocked ids. The spellbook and cooldowns are private, so they go out with
 `ctx.sendTo`, never in the snapshot.
 
-Each slot is bound with `ctx.action({ id, key: 'Digit1' … 'Digit5', ... })`
-in slot order, which is what puts `S1`–`S5` on the action rail (§8) for
-touch **and** the `1`–`5` keys on desktop in the same call — a one-to-one
-hotbar, attack (`⚔`) excluded since it is not a spell slot. A locked slot
-still renders (opacity `.35`, lock glyph, §8) but its key press and button
-tap both no-op client-side; the server rejects the cast regardless via
+The hotbar is six slots, not five: **attack is number 1**, then the five
+`CLASS_SPELLS` slots take `2`–`6` in order, so `key = slotIndex + 2`. Combined
+with the fixed role order above, that pins the same role to the same key on
+every class regardless of which spell fills it:
+
+| Key | `1` | `2` | `3` | `4` | `5` | `6` |
+|---|---|---|---|---|---|---|
+| Role | attack | mobility | special attack | third basic | unlock L10 | unlock L20 |
+
+Each is bound with `ctx.action({ id, key: 'Digit1' … 'Digit6', ... })` — attack
+included — which is what puts `⚔` and `S1`–`S5` on the action rail (§8) for
+touch **and** the matching digit keys on desktop in the same call. A locked
+slot still renders (opacity `.35`, lock glyph, §8) but its key press and
+button tap both no-op client-side; the server rejects the cast regardless via
 `SPELL_FAILED` if one somehow reaches it.
 
 ### 4.5 The spell sets
 
-**Mage** — four were specified; slot 4 is a proposal.
+Key `1` (attack) is the shared `combat:attack` action, not part of
+`CLASS_SPELLS` — every class's basic melee/ranged hit, whatever their weapon.
+The tables below cover keys `2`–`6`.
 
-| # | Spell | Shape | Notes |
+**Mage** — four were specified; Frost Nova is a proposal.
+
+| Key | Spell | Shape | Notes |
 |---|---|---|---|
-| 1 | **Fireball** | projectile, `speedTps 9` | splash radius 1, leaves `burning` |
-| 2 | **Lightning Ray** | ray, range 7 | instant, `pierce: true`, hits everything in the line |
-| 3 | **Blink** | tile + `teleport` | range 5, instant, destination must be walkable and free |
-| 4 | **Frost Nova** *(proposed)* | aoe radius 2 on self | small damage + `rooted 1.5s`. The escape enabler that pairs with Blink and sets up the ice theme. *Alternative:* **Arcane Barrier**, absorbs N damage for 6s, if a defensive slot 4 is preferred |
-| 5 | **Ice Block** (L20) | self | `flags {invulnerable, rooted, silenced}` + `tick {hp:+6 / 500ms}`, 4s. The spec's "total protection plus regeneration, immobile" |
+| 2 | **Blink** *(mobility)* | tile + `teleport` | range 5, instant, destination must be walkable and free |
+| 3 | **Fireball** *(special attack)* | projectile, `speedTps 9` | splash radius 1, leaves `burning`, the heaviest cooldown of the three basics |
+| 4 | **Lightning Ray** | ray, range 7 | instant, `pierce: true`, hits everything in the line |
+| 5 | **Frost Nova** (L10) *(proposed)* | aoe radius 2 on self | small damage + `rooted 1.5s`. The escape enabler that pairs with Blink and sets up the ice theme. *Alternative:* **Arcane Barrier**, absorbs N damage for 6s, if a defensive slot is preferred |
+| 6 | **Ice Block** (L20) | self | `flags {invulnerable, rooted, silenced}` + `tick {hp:+6 / 500ms}`, 4s. The spec's "total protection plus regeneration, immobile" |
 
 **Warrior** — proposal.
 
-| # | Spell | Shape | Notes |
+| Key | Spell | Shape | Notes |
 |---|---|---|---|
-| 1 | **Cleave** | ray range 1, width 3 | a cone, instant, scales with `str` |
-| 2 | **Charge** | dash up to 4 tiles | stops at the first enemy, damage + `stunned 0.8s` |
-| 3 | **War Cry** | self buff | +damage / +defense for 6s |
-| 4 | **Shield Wall** (L10) | self | `taken -60%` for 4s with `slowed` attached — one effect carrying a buff *and* a debuff |
-| 5 | **Whirlwind** (L20) | aoe radius 1 on self | hits everything, short cooldown. *Alternative:* **Execute**, heavy damage below 30% target HP |
+| 2 | **Charge** *(mobility)* | dash up to 4 tiles | stops at the first enemy, damage + `stunned 0.8s` |
+| 3 | **Cleave** *(special attack)* | ray range 1, width 3 | a cone, instant, scales with `str`, longer cooldown than the plain attack |
+| 4 | **War Cry** | self buff | +damage / +defense for 6s |
+| 5 | **Shield Wall** (L10) | self | `taken -60%` for 4s with `slowed` attached — one effect carrying a buff *and* a debuff |
+| 6 | **Whirlwind** (L20) | aoe radius 1 on self | hits everything, short cooldown. *Alternative:* **Execute**, heavy damage below 30% target HP |
 
 **Hunter** — proposal.
 
-| # | Spell | Shape | Notes |
+| Key | Spell | Shape | Notes |
 |---|---|---|---|
-| 1 | **Piercing Shot** | projectile, `speedTps 14` | `pierce: true`, range 9, scales with `agi` |
-| 2 | **Trap** | spawnZone within 2 tiles | invisible to enemies, roots the first one to enter for 2s |
-| 3 | **Hunter's Mark** | tile, instant | `marked` for 8s: the victim takes +20% from everyone |
-| 4 | **Roll** (L10) | dash 3 tiles | passes through entities, +evasion for 1.5s |
-| 5 | **Volley** (L20) | spawnZone, radius 1 | ticking damage for 2s |
+| 2 | **Roll** *(mobility)* | dash 3 tiles | passes through entities, +evasion for 1.5s |
+| 3 | **Piercing Shot** *(special attack)* | projectile, `speedTps 14` | `pierce: true`, range 9, scales with `agi`, the hardest-hitting of the three basics |
+| 4 | **Hunter's Mark** | tile, instant | `marked` for 8s: the victim takes +20% from everyone |
+| 5 | **Trap** (L10) | spawnZone within 2 tiles | invisible to enemies, roots the first one to enter for 2s |
+| 6 | **Volley** (L20) | spawnZone, radius 1 | ticking damage for 2s |
 
 Between the three classes every `targeting` value and every `ACTIONS` entry
 gets exercised, which is what keeps the registry honest.
@@ -498,13 +513,16 @@ Landscape budget, roughly 740×380 CSS px.
 │ chat log                                        [🛒] │  utility column
 │                                                 [👤] │  (top right)
 │                                                      │
-│                                    [S3][S4][S5]      │  rail row 2
-│   ← stick zone 46%×62% →           [⚔][S1][S2]      │  rail row 1 (thumb)
+│                                    [4][5][6]         │  rail row 2
+│   ← stick zone 46%×62% →           [1][2][3]         │  rail row 1 (thumb)
 └──────────────────────────────────────────────────────┘
 ```
 
-- The action rail holds **attack plus five spells**: 52×52 px buttons, three
-  per row, two rows, about 124 px of the 380 available.
+- The action rail holds **attack plus five spells**, keys `1`–`6` (§4.4):
+  52×52 px buttons, three per row, two rows, about 124 px of the 380
+  available. Row 1 (thumb row) is attack, mobility, special attack — the
+  three actions used on reflex; row 2 holds the third basic and the two
+  level-gated unlocks.
 - Locked spells render at `opacity .35` with a lock glyph until their level.
 - The cooldown sweep is a `conic-gradient` driven by one CSS custom property
   updated in `onUpdate`. No extra DOM, no Pixi.
