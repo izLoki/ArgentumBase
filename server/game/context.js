@@ -7,7 +7,7 @@
 
 import { S2C } from '../../shared/protocol.js'
 import { world } from './state.js'
-import { map, tileAt, isWalkable, SPAWN } from '../world/map.js'
+import { map, tileAt, isWalkable, canStand, findFreeTile, SPAWN } from '../world/map.js'
 
 export function createContext(io) {
   return {
@@ -17,6 +17,9 @@ export function createContext(io) {
     SPAWN,
     tileAt,
     isWalkable,
+    /** Whether a whole body fits here. Use it to place anything wider than a tile. */
+    canStand,
+    findFreeTile,
 
     /** Send an event to every connected client. */
     broadcast(event, payload) {

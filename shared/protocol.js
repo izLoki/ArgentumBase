@@ -22,7 +22,7 @@
 export const C2S = {
   // --- core ---
   JOIN: 'core:join', // { name: string, cls: 'warrior'|'mage'|'hunter' }
-  MOVE: 'core:move', // { dir: 0|1|2|3 }
+  MOVE: 'core:move', // { dir: 0|1|2|3, seq: number } one predicted step, already taken locally
   FACE: 'core:face', // { dir: 0|1|2|3 }
   PING: 'core:ping', // { t: number }
 
@@ -48,7 +48,7 @@ export const C2S = {
 /** Server -> Client */
 export const S2C = {
   // --- core ---
-  WELCOME: 'core:welcome', // { selfId, self, map: {w,h,tiles}, systems }
+  WELCOME: 'core:welcome', // { selfId, self, map: {w,h,block,rle}, systems }
   SNAPSHOT: 'core:snapshot', // { t, tick, players: PlayerView[], ext: {} }
   ERROR: 'core:error', // { code, message }
   PONG: 'core:pong', // { t }
@@ -103,6 +103,7 @@ export const S2C = {
  * @property {number} hp
  * @property {number} maxHp
  * @property {boolean} dead
+ * @property {number} seq  last input the core acknowledged, for client prediction
  */
 
 export const ERROR_CODE = {

@@ -9,10 +9,32 @@
 export const TICK_RATE = 15 // server ticks per second
 export const TICK_MS = 1000 / TICK_RATE
 
-export const TILE_SIZE = 32 // pixels per tile on the client
+/**
+ * THE GRID IS FINE, THE TERRAIN IS NOT.
+ *
+ * A tile is a movement step, not a terrain feature. `BLOCK_TILES` tiles make up
+ * one terrain block — the size a tree, a wall or a road segment used to have
+ * when a tile was 32 px. Terrain is generated in blocks and expanded, so the
+ * world keeps its physical size while movement gained four times the
+ * resolution and the grid stopped being visible.
+ *
+ * Gameplay tables (spell range, aggro radius, spawn distance) stay in BLOCK
+ * units — they read the same as they always did. Convert with
+ * `blocksToTiles()` where they meet coordinates.
+ */
+export const TILE_SIZE = 8 // pixels per tile on the client
+export const BLOCK_TILES = 4 // tiles per terrain block
+export const BLOCK_PX = TILE_SIZE * BLOCK_TILES // 32: a block on screen
 
-export const MAP_WIDTH = 64 // tiles
-export const MAP_HEIGHT = 48 // tiles
+/** Block distance -> tile distance. Every range in a data table needs this. */
+export function blocksToTiles(n) {
+  return n * BLOCK_TILES
+}
+
+export const MAP_BLOCKS_W = 64
+export const MAP_BLOCKS_H = 48
+export const MAP_WIDTH = MAP_BLOCKS_W * BLOCK_TILES // tiles
+export const MAP_HEIGHT = MAP_BLOCKS_H * BLOCK_TILES // tiles
 
 /** Tile ids. Any tile whose meta has `blocked: true` stops movement. */
 export const TILE = {
@@ -50,8 +72,33 @@ export const DIR_VEC = {
   [DIR.UP]: { x: 0, y: -1 },
 }
 
-/** Movement cooldown (ms). Enforced by the server — never trust the client. */
-export const MOVE_COOLDOWN_MS = 140
+/**
+ * Time to walk ONE TILE. 35 ms per 8 px is the same speed the world had at
+ * 140 ms per 32 px block — only the step got smaller.
+ *
+ * The client predicts against this number too, so both sides agree on where a
+ * player should be. The server still decides.
+ */
+export const MOVE_COOLDOWN_MS = 35
+
+/**
+ * How many steps the server lets a client bank.
+ *
+ * A distant client sends one step every `MOVE_COOLDOWN_MS`, but the network
+ * delivers them in bursts. A hard cooldown would reject every step in a burst
+ * and the predicted position would rubber-band back on every reconcile. The
+ * bucket absorbs the jitter while still capping the average speed at exactly
+ * one tile per cooldown.
+ */
+export const MOVE_BURST_TILES = 4
+
+/**
+ * Half-size of a player's body, in tiles: `1` means a 3x3 footprint (24 px),
+ * about the size a player sprite has always had on screen. Bodies collide when
+ * their footprints overlap, and a player only fits where the whole footprint
+ * is walkable.
+ */
+export const PLAYER_RADIUS = 1
 
 /**
  * Only used for the instant between `createPlayer` and the profile's first

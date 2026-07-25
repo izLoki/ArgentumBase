@@ -8,9 +8,8 @@
  * binding — that is what keeps keybindings out of merge conflicts.
  */
 
-import { C2S } from '@shared/protocol.js'
 import { DIR } from '@shared/constants.js'
-import { net } from './net.js'
+import { movement } from './movement.js'
 
 const MOVE_KEYS = {
   ArrowUp: DIR.UP,
@@ -23,11 +22,8 @@ const MOVE_KEYS = {
   KeyD: DIR.RIGHT,
 }
 
-const REPEAT_MS = 120
-
 const pressed = new Set()
 const customKeys = new Map()
-let lastMoveSentAt = 0
 let enabled = false
 /** Direction held by the on-screen stick, or null. Owned by ui/touch.js. */
 let virtualDir = null
@@ -54,17 +50,14 @@ export const input = {
     virtualDir = dir ?? null
   },
 
-  /** Called every frame: sends held-down movement. */
+  /**
+   * Called every frame. Movement goes to the predictor, which walks the local
+   * player immediately and rate limits itself — that is what makes holding a
+   * key feel the same on a server two continents away.
+   */
   update() {
     if (!enabled) return
-    const now = performance.now()
-    if (now - lastMoveSentAt < REPEAT_MS) return
-
-    const dir = virtualDir ?? heldDir()
-    if (dir === null) return
-
-    net.send(C2S.MOVE, { dir })
-    lastMoveSentAt = now
+    movement.step(virtualDir ?? heldDir())
   },
 
   get pressed() {

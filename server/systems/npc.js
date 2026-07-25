@@ -17,7 +17,14 @@
  * ---------------------------------------------------------------------------
  */
 
-/** Mob roster. `weight` drives the spawn roll; `spells` go through the executor. */
+/**
+ * Mob roster. `weight` drives the spawn roll; `spells` go through the executor.
+ *
+ * `aggro` and `MIN_SPAWN_DIST` are in BLOCKS, like every gameplay distance in
+ * this project. Convert with `blocksToTiles()` before comparing them against
+ * coordinates, which are in the finer tile grid. `moveMs` is per BLOCK too:
+ * a mob stepping one tile at a time moves every `moveMs / BLOCK_TILES`.
+ */
 export const MOB_TYPES = {
   golem: {
     hp: 160,

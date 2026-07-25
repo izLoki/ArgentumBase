@@ -11,6 +11,7 @@
 
 import { state, self } from '../state.js'
 import { net } from '../net.js'
+import { movement } from '../movement.js'
 
 let els = null
 
@@ -53,6 +54,10 @@ export const hud = {
     els.name.textContent = me.name
     els.hpFill.style.transform = `scaleX(${me.maxHp ? me.hp / me.maxHp : 0})`
     els.hpText.textContent = `${me.hp}/${me.maxHp}`
-    els.debug.textContent = `tile ${me.x},${me.y} · tick ${state.serverTick} · ping ${net.latency}ms · ${state.players.size} online`
+    // The predicted tile is the one on screen. When it disagrees with the
+    // server's, that gap IS the bug worth seeing, so show both.
+    const at = movement.selfTile() ?? me
+    const drift = at.x !== me.x || at.y !== me.y ? ` (server ${me.x},${me.y})` : ''
+    els.debug.textContent = `tile ${at.x},${at.y}${drift} · tick ${state.serverTick} · ping ${net.latency}ms · ${state.players.size} online`
   },
 }

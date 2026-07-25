@@ -3,15 +3,30 @@
  *
  * Sprites are drawn centred on the tile: the container origin sits exactly on
  * the tile centre and every shape is symmetric around it.
+ *
+ * The local player is drawn from the PREDICTED position (see movement.js), not
+ * from the last snapshot. That is the difference between a keypress that moves
+ * you now and one that moves you a round trip from now.
  */
 
 import { Container, Graphics, Text } from 'pixi.js'
-import { TILE_SIZE, CLASSES, DIR_VEC } from '@shared/constants.js'
+import { TILE_SIZE, BLOCK_PX, CLASSES, DIR_VEC, PLAYER_RADIUS } from '@shared/constants.js'
 import { state } from '../state.js'
+import { movement } from '../movement.js'
 
-const LERP = 0.22 // movement smoothing (0 = frozen, 1 = teleport)
-const BODY_W = 18
-const BODY_H = 22
+/**
+ * Smoothing per 60 Hz frame (0 = frozen, 1 = teleport). The local player is
+ * pulled harder: its target is already the truth it asked for, so any lag added
+ * here is lag the player feels in their own hands.
+ */
+const LERP = 0.22
+const SELF_LERP = 0.4
+/** Past this gap a move is not a walk — a respawn or a teleport. Snap instead. */
+const SNAP_PX = BLOCK_PX * 2
+
+/** Body size, in screen pixels: it matches the 3x3 tile footprint that collides. */
+const BODY_W = (PLAYER_RADIUS * 2 + 1) * TILE_SIZE - 4
+const BODY_H = (PLAYER_RADIUS * 2 + 1) * TILE_SIZE
 
 /** @type {Map<string, Container>} playerId -> view */
 const views = new Map()
@@ -69,28 +84,44 @@ function drawFacing(facing, dir) {
     .fill({ color: 0xffffff, alpha: 0.7 })
 }
 
-export function syncEntities(layer) {
+/**
+ * @param {number} [dtMs] frame time. Smoothing is corrected for it, so a 30 fps
+ *   phone and a 144 Hz monitor reach the target at the same speed.
+ */
+export function syncEntities(layer, dtMs = 16.67) {
   const alive = new Set()
+  const self = movement.selfTile()
 
   for (const player of state.players.values()) {
     alive.add(player.id)
+    const isSelf = player.id === state.selfId
+    const from = isSelf && self ? self : player
 
     let view = views.get(player.id)
     if (!view) {
       view = makeView(player)
       views.set(player.id, view)
       layer.addChild(view)
-      view.x = tileCentre(player.x)
-      view.y = tileCentre(player.y)
+      view.x = tileCentre(from.x)
+      view.y = tileCentre(from.y)
     }
 
-    view.x += (tileCentre(player.x) - view.x) * LERP
-    view.y += (tileCentre(player.y) - view.y) * LERP
+    const tx = tileCentre(from.x)
+    const ty = tileCentre(from.y)
+    const k = smoothing(isSelf ? SELF_LERP : LERP, dtMs)
+
+    if (Math.abs(tx - view.x) > SNAP_PX || Math.abs(ty - view.y) > SNAP_PX) {
+      view.x = tx
+      view.y = ty
+    } else {
+      view.x += (tx - view.x) * k
+      view.y += (ty - view.y) * k
+    }
     view.zIndex = view.y
 
     view.alpha = player.dead ? 0.3 : 1
     drawHpBar(view.__bar, player.hp, player.maxHp)
-    drawFacing(view.__facing, player.dir)
+    drawFacing(view.__facing, from.dir)
   }
 
   for (const [id, view] of views) {
@@ -98,6 +129,11 @@ export function syncEntities(layer) {
     view.destroy({ children: true })
     views.delete(id)
   }
+}
+
+/** Frame-rate independent exponential smoothing. */
+function smoothing(perFrame, dtMs) {
+  return 1 - Math.pow(1 - perFrame, Math.min(4, dtMs / 16.67))
 }
 
 /** Pixel centre of a tile coordinate. */

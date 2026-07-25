@@ -15,17 +15,28 @@
  *   cooldownMs         before cooldown reduction
  *   intScaling         how hard cdr cuts THIS cooldown, 0..1
  *   targeting          'self'|'tile'|'ray'|'aoe'|'projectile'|'dash'
- *   range, radius      tiles (Chebyshev)
- *   speedTps           tiles per second, projectiles only
+ *   range, radius      BLOCKS (Chebyshev) — see the note on units below
+ *   speedTps           blocks per second, projectiles only
  *   pierce             keep going after the first target
  *   phasing            dash passes through entities
- *   width              ray width in tiles, for cones
+ *   width              ray width in blocks, for cones
  *   requiresLos        Bresenham line of sight over ctx.isWalkable
  *   fx                 client-side look; the server never reads it
  *   actions            resolved in order by the server executor
  *
  * Action `target` values: 'self' | 'hit' (whatever was struck) | 'area'
  * (everything in radius) | 'tile' (the destination itself).
+ *
+ * UNITS. Distances here are in BLOCKS, the human scale of the world — "range
+ * 8" means eight of the squares terrain is built from, the same reach it read
+ * as before the movement grid was subdivided. Coordinates are in TILES, which
+ * are `BLOCK_TILES` times finer. The executor converts once, where a range
+ * meets a coordinate:
+ *
+ *   import { blocksToTiles } from './constants.js'
+ *   const reach = blocksToTiles(def.range)
+ *
+ * Forgetting the conversion makes every spell a quarter of its intended reach.
  */
 
 import { CDR_MAX } from './profile.js'

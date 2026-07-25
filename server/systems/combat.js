@@ -156,7 +156,10 @@ export function targetAt(ctx, x, y) {
 }
 
 /**
- * Every living target within `radius` tiles (Chebyshev) of a tile.
+ * Every living target within `radius` TILES (Chebyshev) of a tile.
+ *
+ * Tiles, not blocks: this takes coordinates, so callers holding a range from a
+ * data table convert it with `blocksToTiles()` first.
  *
  * @param {Object} [opts]
  * @param {TargetHandle} [opts.exclude]  usually the caster

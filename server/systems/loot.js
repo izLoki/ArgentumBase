@@ -24,7 +24,7 @@ export const DROP_TYPES = {
   ragePotion: { icon: '⚗', effect: 'rage', ms: 8000 },
   swiftPotion: { icon: '🌀', effect: 'swift', ms: 8000 },
   coins: { icon: '🪙', gold: 25 },
-  /** Arms on drop, never picked up. */
+  /** Arms on drop, never picked up. `radius` is in blocks — `blocksToTiles()`. */
   bomb: { icon: '💣', fuseMs: 3000, radius: 2, damage: 55 },
 }
 

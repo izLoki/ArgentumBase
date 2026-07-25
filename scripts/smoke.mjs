@@ -7,6 +7,8 @@
  */
 
 import { io } from 'socket.io-client'
+import { MAP_WIDTH, MAP_HEIGHT, MOVE_BURST_TILES, MOVE_COOLDOWN_MS } from '../shared/constants.js'
+import { decodeTiles } from '../shared/grid.js'
 
 const URL = process.env.SMOKE_URL ?? 'http://localhost:3000'
 
@@ -53,24 +55,41 @@ await wait(1000)
 const selfOf = () => snapshot.players.find((p) => p.id === welcome.selfId)
 
 check('welcome received', !!welcome)
-check('map delivered', welcome?.map?.tiles?.length === 64 * 48, `len=${welcome?.map?.tiles?.length}`)
 check('system flags present', welcome?.systems?.core === true)
 check('two players in snapshot', snapshot?.players?.length === 2, `n=${snapshot?.players?.length}`)
 
+// The map travels run-length encoded: 49k tiles as raw JSON would be ~96 KB.
+let decoded = null
+try {
+  decoded = decodeTiles(welcome.map.rle, welcome.map.w * welcome.map.h)
+} catch (err) {
+  lastError = err
+}
+check('map delivered', decoded?.length === MAP_WIDTH * MAP_HEIGHT, `len=${decoded?.length}`)
+check('map is compact on the wire', JSON.stringify(welcome?.map ?? {}).length < 40_000,
+  `${(JSON.stringify(welcome?.map ?? {}).length / 1024).toFixed(1)} KB`)
+
+// --- movement: the client predicts, the server confirms with `seq` ---
+let seq = 0
 const before = selfOf()
 for (let i = 0; i < 5; i++) {
-  a.emit(C2S.MOVE, { dir: 2 }) // right
-  await wait(180)
+  a.emit(C2S.MOVE, { dir: 2, seq: ++seq }) // right
+  await wait(MOVE_COOLDOWN_MS + 10)
 }
 await wait(200)
 const after = selfOf()
 check('movement applied', after.x > before.x, `${before.x},${before.y} -> ${after.x},${after.y}`)
+check('input sequence acknowledged', after.seq === seq, `ack=${after.seq} sent=${seq}`)
 
 const preSpam = { ...after }
-for (let i = 0; i < 20; i++) a.emit(C2S.MOVE, { dir: 1 }) // spam left
+for (let i = 0; i < 40; i++) a.emit(C2S.MOVE, { dir: 1, seq: ++seq }) // spam left
 await wait(250)
 const postSpam = selfOf()
-check('move cooldown enforced', Math.abs(postSpam.x - preSpam.x) <= 1, `dx=${postSpam.x - preSpam.x}`)
+// A burst is absorbed, not obeyed: the bucket caps how far a spammer gets.
+check('move budget enforced', Math.abs(postSpam.x - preSpam.x) <= MOVE_BURST_TILES + 2,
+  `dx=${postSpam.x - preSpam.x}`)
+check('rejected input still acknowledged', postSpam.seq === seq,
+  `ack=${postSpam.seq} sent=${seq}`)
 
 a.emit(C2S.FACE, { dir: 3 })
 await wait(200)

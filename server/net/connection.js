@@ -10,7 +10,7 @@ import { C2S, S2C, ERROR_CODE } from '../../shared/protocol.js'
 import { NAME_MAX_LEN, CLASSES } from '../../shared/constants.js'
 import { createPlayer, removePlayer, getPlayer, toPlayerView } from '../game/state.js'
 import { buildHandlerTable, invoke, systemFlags } from '../systems/index.js'
-import { map } from '../world/map.js'
+import { mapWire } from '../world/map.js'
 
 const KNOWN_EVENTS = Object.values(C2S)
 
@@ -29,7 +29,7 @@ export function attachConnectionHandlers(io, ctx) {
 
       socket.emit(S2C.WELCOME, {
         selfId: player.id,
-        map,
+        map: mapWire, // run-length encoded: see shared/grid.js
         systems: systemFlags(),
         self: toPlayerView(player),
       })

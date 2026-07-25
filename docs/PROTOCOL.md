@@ -12,6 +12,10 @@ client never sends outcomes ("I dealt 20 damage"), only receives them.
 This keeps a single implementation of every rule and makes the world
 tamper-resistant by construction.
 
+Movement is the one place where the client acts before it is told to — it
+predicts its own steps and the server corrects it. The server still decides;
+see [Predicted movement](#predicted-movement).
+
 ## Handshake
 
 ```
@@ -21,12 +25,33 @@ client                                 server
    |     map, systems} --------------------|
    |                                       |
    |<-- core:snapshot (15/s) --------------|   full world state
-   |-- core:move {dir} ------------------->|   intent
-   |<-- core:snapshot ---------------------|   authoritative result
+   |-- core:move {dir, seq} -------------->|   a step already taken locally
+   |<-- core:snapshot (carries seq back) --|   authoritative result
 ```
 
 `welcome.systems` is a map like `{ combat: false, npc: true }`. The client
 uses it to decide which client systems to start.
+
+`welcome.map` is `{ w, h, block, rle }`. The tiles are run-length encoded —
+`[tileId, count, tileId, count, ...]` — because the fine grid holds ~49k tiles
+and raw JSON would make the handshake ~96 KB instead of ~10 KB. Decode it with
+`decodeTiles()` from `shared/grid.js`.
+
+## Predicted movement
+
+`core:move` reports a step the client has **already applied locally**, tagged
+with an ever-increasing `seq`. The server re-runs the same rules (the ones in
+`shared/grid.js`, which both sides import) and echoes the last sequence it
+processed back in `players[].seq`.
+
+The client keeps every unacknowledged step and, on each snapshot, replays them
+on top of the server's position. Agreement — the normal case — means the replay
+lands where the prediction already was and nothing moves on screen. Disagreement
+means the server wins on the next snapshot.
+
+`seq` advances even when the server **refuses** the step. It acknowledges "I saw
+this input", not "I allowed it": a client that never learned its move was
+rejected would replay it forever and stay permanently ahead.
 
 ## Snapshot shape
 
@@ -34,7 +59,7 @@ uses it to decide which client systems to start.
 {
   t: 1721800000000,   // server timestamp
   tick: 4211,
-  players: [ { id, name, cls, x, y, dir, hp, maxHp, dead } ],
+  players: [ { id, name, cls, x, y, dir, hp, maxHp, dead, seq } ],
   ext: {
     // whatever each enabled system returned from collectSnapshot()
     // <systemId>: { ... }
