@@ -20,47 +20,133 @@ core stays untouched except for the additive hooks listed in
 | Classes | `warrior`, `mage`, `hunter` |
 | Format | Persistent arena. No rounds, no match state, no reset |
 | Death | You keep level, spells, attributes and gear. You respawn with full HP after a short delay, with brief spawn protection. You drop loot on the ground |
-| Attributes | Grow **only on level up**, following a fixed per-class curve. There is no manual point spending |
+| Level cap | **20**. Attributes at any level are a linear interpolation between the class's level 1 and level 20 blocks — a pure function of class and level, with no manual point spending |
 | Experience | Flat per victim: each class and each monster type is worth a different amount, but who you killed does not steer which attribute grows |
 | Mana | Does not exist. Cooldown is the only limit on spells |
-| Intelligence | Reduces every cooldown **and** boosts spell damage, weighted per spell |
+| Cooldown reduction | **Global and identical for every spell**: linear in intelligence, `[0, 150]` of `int` mapping onto `[0%, 50%]` |
+| Spell damage | Tuned per spell by a `base` and a `scaling` factor saying how much of that spell's damage derives from its attribute |
 | Gear | Accumulating tiers (sword / armor / staff / boots), never individual items |
 
-### 1.1 Attributes and derived stats
-
-Attributes are the four already defined in `shared/profile.js`:
+### 1.1 What each attribute drives
 
 | Attribute | Drives |
 |---|---|
-| `str` | melee damage |
-| `agi` | evasion, and the damage of agility-scaling spells |
-| `int` | cooldown reduction and spell power |
-| `con` | max HP and defense |
+| `str` | damage of strength-scaling spells, and part of max HP |
+| `agi` | movement speed, and damage of agility-scaling spells |
+| `int` | cooldown reduction, and damage of intelligence-scaling spells |
+| `con` | max HP |
 
-`deriveStats()` gains two keys so intelligence has somewhere to land. Both are
-**integer percentages**, because `deriveStats` rounds every stat:
+Note what is **not** here: no attribute feeds `defense` or `evasion`. Those
+become gear-and-effect stats only — armor and boots are the only way to raise
+them. That is deliberate: it keeps gear meaningful next to a level curve that
+is otherwise fully determined by class.
+
+One shared reference ceiling anchors every formula:
 
 ```js
-spellPower: 100 + a.int * 4          // 100 = neutral
-cdr:        Math.min(45, a.int * 1.2) // percent, clamped again at the use site
+export const ATTR_MAX = 150   // what the specialising class reaches at level 20
 ```
 
-### 1.2 Growth per level
+Derived stats:
 
 ```js
-export const GROWTH_PER_LEVEL = {
-  warrior: { str: 2, agi: 1, int: 0, con: 2 },
-  mage:    { str: 0, agi: 1, int: 3, con: 1 },
-  hunter:  { str: 1, agi: 3, int: 1, con: 1 },
+maxHp:     40 + a.con * 4 + Math.round(a.str * 1.5),
+cdr:       Math.min(CDR_MAX_PCT, (a.int / ATTR_MAX) * CDR_MAX_PCT),  // percent
+moveSpeed: Math.min(MOVE_MAX_PCT, (a.agi / ATTR_MAX) * MOVE_MAX_PCT), // percent
+damage:    0,        // flat bonus, gear and effects only
+defense:   0,        // gear and effects only
+evasion:   0,        // gear and effects only
+```
+
+`cdr` and `moveSpeed` are **integer percentages**, because `deriveStats`
+rounds every stat. The caps are applied again at the use site so that gear
+can add to them without ever breaking the ceiling.
+
+### 1.2 Cooldown reduction
+
+Global and identical for every spell — there is no per-spell cooldown
+scaling. Linear in intelligence, mapping `[0, 150]` of `int` onto `[0%, 50%]`
+of reduction:
+
+```js
+export const CDR_MAX_PCT = 50
+
+export function effectiveCooldown(def, stats) {
+  const cdr = Math.min(CDR_MAX_PCT, stats?.cdr ?? 0) / 100
+  return Math.round(def.cooldownMs * (1 - cdr))
 }
 ```
 
-Applied inside the existing level-up loop of `addExp`
-(`server/systems/profile.js`). `POINTS_PER_LEVEL` and `STARTING_POINTS` drop
-to `0`; the `PROFILE_SPEND_POINT` handler stays in place but can never
-succeed, so nothing on the client breaks.
+So a mage at level 20 (`int` 150) fires everything at half its base cooldown,
+and a warrior at level 20 (`int` 40) at about 87%. Gear that grants `cdr` adds
+into the same stat and is clamped by the same 50% ceiling.
 
-### 1.3 Kill rewards
+### 1.3 Movement speed
+
+Same shape, driven by agility. It reduces the move cooldown rather than
+raising a speed:
+
+```js
+export const MOVE_MAX_PCT = 40
+
+// effective move cooldown, in server/systems/core.js
+MOVE_COOLDOWN_MS * (1 - Math.min(MOVE_MAX_PCT, stats.moveSpeed) / 100)
+```
+
+A hunter at level 20 (`agi` 150) walks at 84 ms per tile instead of 140 ms.
+This needs one additive line in the core `MOVE` handler — see
+[Foundations](#foundations).
+
+### 1.4 Attributes by level
+
+Level max is **20**. A character's attributes are a **pure function of class
+and level**: linear interpolation between the level 1 block and the level 20
+block, which is different for every class.
+
+```js
+export const LEVEL_MAX = 20
+
+export const BASE_ATTRIBUTES = {   // level 1
+  warrior: { str:  20, agi: 12, int:  8, con:  25 },
+  mage:    { str:   8, agi: 14, int: 25, con:  12 },
+  hunter:  { str:  12, agi: 25, int: 12, con:  15 },
+}
+
+export const MAX_ATTRIBUTES = {    // level 20
+  warrior: { str: 130, agi:  60, int:  40, con: 150 },
+  mage:    { str:  40, agi:  70, int: 150, con:  70 },
+  hunter:  { str:  70, agi: 150, int:  75, con:  90 },
+}
+
+export function attributesForLevel(cls, level) {
+  const t = (clamp(level, 1, LEVEL_MAX) - 1) / (LEVEL_MAX - 1)
+  const lo = BASE_ATTRIBUTES[cls], hi = MAX_ATTRIBUTES[cls]
+  return Object.fromEntries(
+    ATTRIBUTES.map((k) => [k, Math.round(lo[k] + (hi[k] - lo[k]) * t)]),
+  )
+}
+```
+
+This is a real simplification over accumulating growth: **`profile.attributes`
+stops being mutable state and becomes derived**, exactly like `stats`.
+`recompute()` calls `attributesForLevel(cls, level)` and that is the whole
+progression system. Consequences:
+
+- `POINTS_PER_LEVEL`, `STARTING_POINTS` and `profile.points` are removed.
+- The `PROFILE_SPEND_POINT` handler is removed along with its C2S event and
+  the `+` buttons in the client profile panel.
+- Nothing can ever desync a player's attributes from their level, so there is
+  no migration or repair path to write.
+
+Tune a class by editing two rows. The level 20 numbers are what balance
+actually turns on: `MAX_ATTRIBUTES.mage.int = 150` is what grants the mage the
+full 50% cooldown reduction, and `MAX_ATTRIBUTES.hunter.agi = 150` is what
+grants the hunter the full 40% movement bonus.
+
+`expForLevel` needs re-tuning for a 20-level curve — the current
+`50 * level * (level + 1)` was written for 50 levels.
+
+### 1.5 Kill rewards
 
 Flat XP and coins per victim, in `shared/rewards.js`:
 
@@ -187,7 +273,7 @@ entries and publishes a single modifier:
 function republish(ctx, player) {
   const sum = {}
   for (const e of player.ext.effects.active.values())
-    for (const [k, v] of Object.entries(EFFECTS[e.id].stats ?? {}))
+    for (const [k, v] of Object.entries(e.params.stats ?? {}))
       sum[k] = (sum[k] ?? 0) + v * e.stacks
 
   const sig = JSON.stringify(sum)
@@ -196,6 +282,8 @@ function republish(ctx, player) {
   setModifier(ctx, player, 'effects', sum)
 }
 ```
+
+Note it reads `e.params`, the **instance**, not the definition — see §3.3.
 
 **The change gate is mandatory.** `setModifier` triggers `recompute()` which
 sets `dirty = true`, and `profile.onTick` turns that into a private
@@ -216,21 +304,94 @@ and keeping them separate keeps the two features independently mergeable.
 - **Instant damage.** Modelling "Fireball deals 40" as a `-40 maxHp` buff
   would fight the clamp in `applyVitals`.
 
-### 3.3 Effect table (`shared/effects.js`)
+### 3.3 Definition versus instance
+
+A first draft of this table baked the magnitude into the definition:
 
 ```js
+burning: { name:'Burning', icon:'🔥', tick:{ hp:-4, everyMs:500 } }   // WRONG
+```
+
+That makes every burn in the game identical. Two spells that both apply
+`burning`, where one is meant to burn harder than the other, cannot be
+expressed at all.
+
+The fix is to split the two things that were conflated. **The definition
+declares identity and behaviour; the application site supplies the
+magnitude; the instance stores the resolved numbers.**
+
+```js
+// shared/effects.js — WHAT the effect is, and what it can be tuned by
 export const EFFECTS = {
-  iceBlock: { name:'Ice Block', icon:'🧊',
-              flags:{ invulnerable:true, rooted:true, silenced:true },
-              tick:{ hp:+6, everyMs:500 } },
-  burning:  { name:'Burning',   icon:'🔥', tick:{ hp:-4, everyMs:500 } },
-  marked:   { name:'Marked',    icon:'🎯', taken:{ all:+20 } },
-  rooted:   { name:'Rooted',    icon:'🪢', flags:{ rooted:true } },
-  stunned:  { name:'Stunned',   icon:'💫', flags:{ rooted:true, silenced:true } },
-  rage:     { name:'Rage',      icon:'⚗',  stats:{ damage:+8 } },
-  swift:    { name:'Swift',     icon:'🌀', stats:{ evasion:+6 } },
+  burning: {
+    name: 'Burning', icon: '🔥',
+    kind: 'dot',                    // which runtime path handles it
+    everyMs: 500,
+    stacking: 'strongest',
+    defaults: { tick: { hp: -4 } }, // used when the caller says nothing
+  },
+  iceBlock: {
+    name: 'Ice Block', icon: '🧊',
+    kind: 'aura', everyMs: 500, stacking: 'refresh',
+    defaults: {
+      flags: { invulnerable: true, rooted: true, silenced: true },
+      tick:  { hp: +6 },
+    },
+  },
+  marked: { name:'Marked', icon:'🎯', kind:'aura', stacking:'refresh',
+            defaults: { taken: { all: +20 } } },
+  rooted: { name:'Rooted', icon:'🪢', kind:'aura', stacking:'refresh',
+            defaults: { flags: { rooted: true } } },
+  rage:   { name:'Rage',   icon:'⚗', kind:'aura', stacking:'strongest',
+            defaults: { stats: { damage: +8 } } },
 }
 ```
+
+A spell overrides whatever it wants when it applies the effect:
+
+```js
+// a weak burn
+{ type:'effect', effect:'burning', ms:3000 }
+
+// a hard burn, from a bigger spell
+{ type:'effect', effect:'burning', ms:5000, params:{ tick:{ hp:-11 } } }
+```
+
+And the stored instance carries the **resolved** values:
+
+```js
+{ id:'burning', endsAt, params:{ tick:{ hp:-11 } }, sourceId, stacks, nextTickAt }
+```
+
+```js
+export function resolveParams(effectId, overrides, casterStats) {
+  const def = EFFECTS[effectId]
+  return deepMerge(def.defaults, typeof overrides === 'function'
+    ? overrides(casterStats)     // lets a DoT scale with the caster's int
+    : overrides ?? {})
+}
+```
+
+Params are resolved **once, at application time**, from the caster's stats as
+they were at that moment. A DoT does not get weaker because its caster died,
+swapped gear or was debuffed mid-burn. That is both simpler to reason about
+and cheaper than re-reading the caster every tick.
+
+### 3.4 Stacking
+
+Two `burning` instances landing on the same victim is a real case, so the
+policy is part of the definition rather than an implicit rule:
+
+| `stacking` | Behaviour | Instance key |
+|---|---|---|
+| `refresh` | The newest replaces the old one and brings its own params. Control effects — root, stun, Ice Block | `effectId` |
+| `strongest` | The bigger magnitude wins; the weaker one is discarded or kept dormant. DoTs and stat buffs — burning, rage | `effectId` |
+| `stack` | Independent instances that all tick, up to `maxStacks` | `effectId + sourceId` |
+| `perSource` | One instance per caster, each with its own params | `effectId + sourceId` |
+
+`strongest` is the right default for `burning`: two mages burning the same
+target does not double the damage, but the stronger spell wins — which is what
+makes tuning one spell to burn harder than another actually mean something.
 
 `rooted` needs a hook the core does not have yet: see
 [Foundations](#foundations), `registerMoveGate`.
@@ -251,10 +412,9 @@ export const SPELLS = {
   fireball: {
     id: 'fireball', name: 'Fireball', icon: '🔥',
     cls: 'mage', slot: 1,
-    cooldownMs: 2400,
-    intScaling: 0.9,          // how hard int cuts THIS cooldown (0..1)
+    cooldownMs: 2400,         // reduced globally by cdr — no per-spell cooldown scaling
 
-    targeting: 'projectile',  // 'self'|'tile'|'ray'|'aoe'|'projectile'|'dash'
+    targeting: 'projectile',  // 'melee'|'self'|'tile'|'ray'|'aoe'|'projectile'|'dash'
     range: 8, radius: 1,
     speedTps: 9,              // tiles per second, projectiles only
     pierce: false, stopsOnTerrain: true, requiresLos: true,
@@ -262,8 +422,8 @@ export const SPELLS = {
     fx: { color: 0xff7a3c, shape: 'orb', trail: true, impact: 'burst' },
 
     actions: [
-      { type: 'damage', base: 18, scale: { int: 1.6 }, school: 'fire', target: 'hit' },
-      { type: 'effect', effect: 'burning', ms: 3000, target: 'hit' },
+      { type: 'damage', base: 30, attr: 'int', scaling: 1.2, school: 'fire', target: 'hit' },
+      { type: 'effect', effect: 'burning', ms: 3000, params: { tick: { hp: -7 } }, target: 'hit' },
     ],
   },
 }
@@ -273,13 +433,47 @@ export const CLASS_SPELLS = {
   warrior: ['cleave', 'charge', 'warCry', 'shieldWall', 'whirlwind'],
   hunter:  ['piercingShot', 'trap', 'huntersMark', 'roll', 'volley'],
 }
-export const UNLOCK_LEVELS = [1, 1, 1, 8, 14]   // by slot index
+export const UNLOCK_LEVELS = [1, 1, 1, 8, 14]   // by slot index, out of LEVEL_MAX 20
+```
 
-export function effectiveCooldown(def, stats) {
-  const cdr = Math.min(45, (stats?.cdr ?? 0) * def.intScaling) / 100
-  return Math.round(def.cooldownMs * (1 - cdr))
+### 4.2 The two balance knobs on a spell
+
+Each damaging action carries the two numbers that tune it, and nothing else:
+
+```js
+{ type:'damage', base: 30, attr: 'int', scaling: 1.2 }
+```
+
+| Field | Meaning |
+|---|---|
+| `base` | damage at attribute 0 — the floor the spell always delivers |
+| `attr` | which attribute scales it: `'str'`, `'agi'` or `'int'` |
+| `scaling` | **how much of the damage derives from stats** |
+
+```js
+export function spellDamage(action, attrs, stats) {
+  const a = attrs[action.attr] ?? 0
+  const scaled = action.base * (1 + action.scaling * (a / ATTR_MAX))
+  return Math.round(scaled + (stats.damage ?? 0))   // gear/effect flat bonus on top
 }
 ```
+
+`scaling` reads directly as a multiplier at the ceiling:
+
+| `scaling` | Damage at `ATTR_MAX` | Character |
+|---|---|---|
+| `0` | `base` | ignores stats entirely — utility spells, traps |
+| `0.5` | `1.5 × base` | mostly flat, mildly rewarded by stats |
+| `1` | `2 × base` | the normal case |
+| `2` | `3 × base` | a scaling payoff spell that is weak early and dominant at 20 |
+
+So a spell is balanced by moving `base` (how strong it is at level 1) and
+`scaling` (how much it grows). Two spells can share an attribute and still
+have completely different curves — which is exactly the lever that was missing.
+
+The choice of `attr` is what makes a spell belong to its class in practice: a
+`str`-scaling spell in a mage's hands stays near its `base` forever, because
+`MAX_ATTRIBUTES.mage.str` is only 40.
 
 **Adding a spell is one table row.** Adding a new *kind* of spell is one entry
 in the action registry inside `server/systems/spells.js`:
@@ -289,7 +483,7 @@ const ACTIONS = { damage, heal, effect, teleport, dash, knockback, spawnZone, di
 export function registerAction(type, fn) { ACTIONS[type] = fn }
 ```
 
-### 4.2 Resolution shapes
+### 4.3 Resolution shapes
 
 | `targeting` | C2S payload | Server resolution |
 |---|---|---|
@@ -306,7 +500,7 @@ makes late joiners and packet loss self-healing. Keep the payload terse —
 `{ i, s, x, y, vx, vy }` with positions in tenths of a tile. A one-shot
 `SPELL_CAST_FX` starts the animation locally so the caster sees zero latency.
 
-### 4.3 Mobs cast through the same executor
+### 4.4 Mobs cast through the same executor
 
 `castSpell(ctx, casterRef, spellId, target)` takes a **caster handle**, not a
 player:
@@ -318,14 +512,23 @@ player:
 A dragon's fireball is literally `SPELLS.fireball` with `cls: 'npc'`. No
 duplicated projectile code.
 
-### 4.4 Learning and unlocking
+### 4.5 Learning and unlocking
 
 `spells.onPlayerJoin` seeds `known = CLASS_SPELLS[cls].slice(0, 3)`. On level
 up it compares `profile.level` against `UNLOCK_LEVELS` and pushes newly
 unlocked ids. The spellbook and cooldowns are private, so they go out with
 `ctx.sendTo`, never in the snapshot.
 
-### 4.5 The spell sets
+### 4.6 The spell sets
+
+The **basic melee attack is slot 0**, a spell definition like any other:
+`targeting: 'melee'`, range 1, `attr: 'str'`, a short cooldown, available to
+every class from level 1. That keeps the ⚔ button on the same code path as
+everything else instead of a parallel implementation inside `combat`.
+
+Each class's spells scale off its own attribute — `int` for the mage, `str`
+for the warrior, `agi` for the hunter — with the exceptions noted below.
+Utility spells use `scaling: 0`.
 
 **Mage** — four were specified; slot 4 is a proposal.
 
@@ -366,13 +569,24 @@ gets exercised, which is what keeps the registry honest.
 
 ```js
 const MOB_TYPES = {
-  golem:  { hp:160, stats:{damage:14, defense:8, spellPower:100, cdr:0},  moveMs:520, aggro:7,  spells:['stoneSlam'],             weight:3 },
-  dragon: { hp:220, stats:{damage:11, defense:5, spellPower:150, cdr:20}, moveMs:400, aggro:10, spells:['fireball','fireBreath'], weight:1 },
-  wisp:   { hp: 60, stats:{damage: 7, defense:2, spellPower:110, cdr:10}, moveMs:240, aggro:8,  spells:['spark'],                 weight:4 },
-  imp:    { hp: 90, stats:{damage: 9, defense:3, spellPower:120, cdr:15}, moveMs:320, aggro:9,  spells:['hex'],                   weight:3 },
+  golem:  { hp:220, attrs:{str:110, agi: 15, int: 10, con:120 }, stats:{damage:+6, defense:10},
+            moveMs:520, aggro: 7, spells:['stoneSlam'],             weight:3 },
+  dragon: { hp:260, attrs:{str: 60, agi: 45, int:120, con: 90 }, stats:{damage:+4, defense: 6},
+            moveMs:400, aggro:10, spells:['fireball','fireBreath'], weight:1 },
+  wisp:   { hp: 70, attrs:{str: 10, agi:100, int: 40, con: 20 }, stats:{damage:+1, defense: 2},
+            moveMs:240, aggro: 8, spells:['spark'],                 weight:4 },
+  imp:    { hp:110, attrs:{str: 25, agi: 50, int: 70, con: 35 }, stats:{damage:+2, defense: 3},
+            moveMs:320, aggro: 9, spells:['hex'],                   weight:3 },
 }
 const MAX_MOBS = 24, SPAWN_INTERVAL_MS = 2500, MIN_SPAWN_DIST = 10
 ```
+
+Mobs carry an `attrs` block on the same `[0, 150]` scale as players, so
+`spellDamage()` and `effectiveCooldown()` work on them unchanged — a mob is
+just another caster handle. Their `hp` is authored directly rather than
+derived, because a mob has no level curve to interpolate. `moveMs` is
+likewise authored rather than derived from `agi`: mob movement does not go
+through the player `MOVE` handler.
 
 **Tick budget at 15 Hz.** Every mob carries a `nextThinkAt` with a randomised
 200–400 ms think interval, so roughly 10–14 think per tick rather than all 24.
@@ -405,12 +619,19 @@ export const GEAR = {
     tiers:[ {}, {cost:70,  mods:{defense:+4, maxHp:+15}},
                 {cost:170, mods:{defense:+9, maxHp:+35}}, ... ] },
   focus:  { label:'Staff', icon:'🔮', restrict:['mage'],
-    tiers:[ {}, {cost:80,  mods:{spellPower:+8, cdr:+3}},
-                {cost:190, mods:{spellPower:+18, cdr:+7}}, ... ] },
+    tiers:[ {}, {cost:80,  mods:{cdr:+3,  damage:+3}},
+                {cost:190, mods:{cdr:+7,  damage:+8}}, ... ] },
   boots:  { label:'Boots', icon:'👢', restrict:null,
-    tiers:[ {}, {cost:50,  mods:{evasion:+3}, mult:{taken:-4}}, ... ] },
+    tiers:[ {}, {cost:50,  mods:{moveSpeed:+4, evasion:+3}, mult:{taken:-4}}, ... ] },
 }
 ```
+
+`damage` is a **flat bonus added after** `spellDamage()` scales the spell, so
+gear helps a level 1 character noticeably and a level 20 one marginally —
+which is what keeps the shop relevant early without letting it decide fights
+late. `cdr` and `moveSpeed` from gear are clamped by the same global ceilings
+as the attribute-derived part, so a mage with a tier 3 staff still cannot pass
+50% cooldown reduction.
 
 Buying: `INVENTORY_BUY { slot }` buys the next tier only, charges through
 `spendGold` (already atomic — it returns `false` and changes nothing when the
@@ -551,8 +772,10 @@ in milestone M0 — see `ROADMAP.md`.
 | Change | File | Why |
 |---|---|---|
 | `archer` → `hunter` | `shared/constants.js`, `shared/profile.js`, `client/index.html` | class list |
-| `spellPower` and `cdr` in `STAT_KEYS` and `deriveStats` | `shared/profile.js` | intelligence needs somewhere to land |
+| `STAT_KEYS` becomes `['maxHp', 'damage', 'defense', 'evasion', 'cdr', 'moveSpeed']`, and `deriveStats` follows §1.1 | `shared/profile.js` | `cdr` and `moveSpeed` are where intelligence and agility land; `maxMana` and `spellPower` are gone |
 | Mana removed from the derived-stat surface and the HUD; the MP bar becomes an XP bar | `shared/profile.js`, `server/systems/profile.js`, `client/src/ui/hud.js`, `client/index.html` | there is no mana. The vestigial `player.mana` fields stay — removing them means editing the core for no gain |
-| `GROWTH_PER_LEVEL` applied inside `addExp` | `shared/profile.js`, `server/systems/profile.js` | attributes grow on level up |
+| `LEVEL_MAX` 50 → 20, `MAX_ATTRIBUTES`, `attributesForLevel`, re-tuned `expForLevel`. `recompute()` derives attributes from class and level | `shared/profile.js`, `server/systems/profile.js` | §1.4 — attributes become derived, not accumulated |
+| Remove `POINTS_PER_LEVEL`, `STARTING_POINTS`, `profile.points`, the `PROFILE_SPEND_POINT` event and handler, and the `+` buttons in the client panel | `shared/profile.js`, `server/systems/profile.js`, `shared/protocol.js`, `client/src/systems/profile.js` | there is no manual point spending any more |
+| `player.moveCooldownMs`, written by `profile.applyVitals` from `stats.moveSpeed`, read by the `MOVE` handler as `player.moveCooldownMs ?? MOVE_COOLDOWN_MS` | `server/systems/profile.js`, `server/systems/core.js` | agility has to actually make you faster; one line in the core |
 | `registerMoveGate(fn)` plus one guard in the `MOVE` handler | `server/game/state.js`, `server/systems/core.js` | `rooted` and `stunned` need to stop movement without hacking the core |
 | `ctx.action({ ..., slot: 'rail'\|'utility' })` and an `#actions-utility` container built in JS | `client/src/ui/touch.js`, `CLAUDE.md` | nine buttons do not fit one rail, and every feature author inventing their own floating button is worse |

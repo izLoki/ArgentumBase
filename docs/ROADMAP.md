@@ -46,17 +46,20 @@ One person. No visible gameplay change. `npm run smoke` must still pass.
 | Task | What | Files |
 |---|---|---|
 | **M0.1** | Rename `archer` to `hunter` | `shared/constants.js` (`CLASSES`), `shared/profile.js` (`BASE_ATTRIBUTES`), `client/index.html` (login option), the comment on `shared/protocol.js` `JOIN` |
-| **M0.2** | Add `spellPower` and `cdr` to `STAT_KEYS` and `deriveStats`. **Integer percentages** — `deriveStats` rounds every key. `spellPower: 100 + int*4`, `cdr: min(45, int*1.2)` | `shared/profile.js` |
+| **M0.2** | `STAT_KEYS` becomes `['maxHp','damage','defense','evasion','cdr','moveSpeed']`; `deriveStats` follows `ARENA.md` §1.1. `cdr` and `moveSpeed` are **integer percentages** — `deriveStats` rounds every key. Add `ATTR_MAX = 150`, `CDR_MAX_PCT = 50`, `MOVE_MAX_PCT = 40` | `shared/profile.js` |
 | **M0.3** | Drop mana from the derived-stat surface and the HUD; the MP bar becomes an XP bar. Leave the vestigial `player.mana` core fields alone | `shared/profile.js`, `server/systems/profile.js`, `client/src/ui/hud.js`, `client/src/systems/profile.js`, `client/index.html` |
-| **M0.4** | `GROWTH_PER_LEVEL` plus auto-allocation inside the level-up loop of `addExp`. `POINTS_PER_LEVEL` and `STARTING_POINTS` go to `0` | `shared/profile.js`, `server/systems/profile.js` |
-| **M0.5** | `registerMoveGate(fn)` in the core plus one guard in the `MOVE` handler, so `rooted` and `stunned` work without a hack | `server/game/state.js`, `server/systems/core.js` |
-| **M0.6** | `ctx.action({ ..., slot: 'rail'\|'utility' })` and an `#actions-utility` container built in JS, top right. Document the new parameter in the `ctx` table of `CLAUDE.md` in the same commit | `client/src/ui/touch.js`, `CLAUDE.md` |
-| **M0.7** | **Freeze the contracts.** The four `shared/` data files with their initial tables, and all six systems on both sides created with `enabled: false`, full JSDoc, and every export present as a no-op with its final signature | `shared/{spells,effects,gear,rewards}.js`, `server/systems/{combat,effects,spells,npc,inventory,loot}.js`, the client mirrors, both `index.js` |
-| **M0.8** | Every protocol event, in per-system blocks at the end of `C2S` and `S2C` | `shared/protocol.js`, `docs/PROTOCOL.md` |
+| **M0.4** | The level curve: `LEVEL_MAX` 50 → 20, add `MAX_ATTRIBUTES` and `attributesForLevel`, re-tune `expForLevel`, and make `recompute()` derive attributes from class and level (`ARENA.md` §1.4) | `shared/profile.js`, `server/systems/profile.js` |
+| **M0.5** | Remove manual point spending entirely: `POINTS_PER_LEVEL`, `STARTING_POINTS`, `profile.points`, the `PROFILE_SPEND_POINT` event and handler, and the `+` buttons in the client panel | `shared/profile.js`, `server/systems/profile.js`, `shared/protocol.js`, `client/src/systems/profile.js` |
+| **M0.6** | Movement speed: `profile.applyVitals` writes `player.moveCooldownMs` from `stats.moveSpeed`; the `MOVE` handler reads `player.moveCooldownMs ?? MOVE_COOLDOWN_MS`. Plus `registerMoveGate(fn)` and one guard in the same handler, so `rooted` and `stunned` work without a hack | `server/systems/profile.js`, `server/game/state.js`, `server/systems/core.js` |
+| **M0.7** | `ctx.action({ ..., slot: 'rail'\|'utility' })` and an `#actions-utility` container built in JS, top right. Document the new parameter in the `ctx` table of `CLAUDE.md` in the same commit | `client/src/ui/touch.js`, `CLAUDE.md` |
+| **M0.8** | **Freeze the contracts.** The four `shared/` data files with their initial tables, and all six systems on both sides created with `enabled: false`, full JSDoc, and every export present as a no-op with its final signature | `shared/{spells,effects,gear,rewards}.js`, `server/systems/{combat,effects,spells,npc,inventory,loot}.js`, the client mirrors, both `index.js` |
+| **M0.9** | Every protocol event, in per-system blocks at the end of `C2S` and `S2C` | `shared/protocol.js`, `docs/PROTOCOL.md` |
 
 **Definition of done:** `npm run smoke` passes, two browser tabs can still
 join and walk around, `/health` lists the six new systems as disabled, and
-every function named in `ARENA.md` §2 exists and is importable.
+every function named in `ARENA.md` §2 exists and is importable. A hunter
+should visibly outwalk a warrior at the same level — that is the cheapest
+proof M0.2, M0.4 and M0.6 all landed correctly.
 
 ---
 
@@ -67,7 +70,7 @@ halves. Nothing else in the repo.
 
 | Task | What | Depends on |
 |---|---|---|
-| **A1** | `effects` server: the timed layer, flags, DoT and HoT ticks, expiry, and the change-gated `setModifier` from `ARENA.md` §3.1. Register the pipeline stage that handles `invulnerable` and `taken` multipliers | M0 |
+| **A1** | `effects` server: the timed layer, flags, DoT and HoT ticks, expiry, and the change-gated `setModifier` from `ARENA.md` §3.1. **Definition versus instance (§3.3) and the four stacking policies (§3.4) are the core of this task** — an effect's magnitude comes from the caller, never from the table. Register the pipeline stage that handles `invulnerable` and `taken` multipliers | M0 |
 | **A2** | `effects` client: status icons above heads in `layers.overlay`, driven by `EFFECTS_SELF` and the public icon list in the snapshot | A1 |
 | **A3** | `combat` server: target providers, damage pipeline, melee attack, death, respawn timer and spawn protection. Register the `players` provider in `init` | M0 |
 | **A4** | `combat` server: kill attribution — `addExp` and `addGold` from `shared/rewards.js` — the kill feed, and `kills`/`deaths` in `collectSnapshot` | A3 |
@@ -90,8 +93,8 @@ and their client halves.
 
 | Task | What | Depends on |
 |---|---|---|
-| **B1** | `shared/spells.js` in full: all fifteen definitions from `ARENA.md` §4.5, plus `effectiveCooldown` and the damage helper | M0 |
-| **B2** | `spells` server: the executor, the `ACTIONS` registry, all six targeting shapes, cooldowns from `cdr`, level-gated unlocks, the private spellbook | B1, A3 signature |
+| **B1** | `shared/spells.js` in full: the melee slot 0 plus all fifteen definitions from `ARENA.md` §4.6, each with its `base` / `attr` / `scaling` triple (§4.2), plus `effectiveCooldown` and `spellDamage` | M0 |
+| **B2** | `spells` server: the executor, the `ACTIONS` registry, all seven targeting shapes, cooldowns from `cdr`, level-gated unlocks, the private spellbook | B1, A3 signature |
 | **B3** | `spells` client: five rail buttons, cooldown sweeps, auto-target plus long-press aiming, projectile / ray / impact rendering in `layers.fx` | B2 |
 | **B4** | `npc` server: the mob table, spawner, AI, `registerBlocker` and `registerTargetProvider`, casting through B2's executor, drops through `loot.spawnDrop` | B2, A3 signature |
 | **B5** | `npc` client: mob rendering with health bars in `layers.entities`, and `mobViewPosition` for other systems to anchor FX | B4 |
@@ -128,7 +131,9 @@ internals. That is the only friction point between lanes.
 ## M9 — Close out
 
 - Balance pass, with at least two anti-snowball levers switched on
-  (`ARENA.md` §1.3).
+  (`ARENA.md` §1.5). Tuning happens in two places and nowhere else:
+  `MAX_ATTRIBUTES` for class identity, and each spell's `base` / `scaling`
+  pair for its curve.
 - Extend `scripts/smoke.mjs` to cover cast → damage → death → reward, and
   assert that one melee hit produces exactly one `combat:hit`.
 - Verify the mobile layout with `?touch=1`.
