@@ -17,6 +17,8 @@ const C2S = {
   MOVE: 'core:move',
   FACE: 'core:face',
   CHAT_SAY: 'chat:say',
+  COMBAT_ATTACK: 'combat:attack',
+  COMBAT_RESPAWN: 'combat:respawn',
 }
 const S2C = {
   WELCOME: 'core:welcome',
@@ -24,7 +26,13 @@ const S2C = {
   CHAT: 'chat:msg',
   ERROR: 'core:error',
   PROFILE_SELF: 'profile:self',
+  COMBAT_HIT: 'combat:hit',
+  COMBAT_DEATH: 'combat:death',
+  COMBAT_RESPAWNED: 'combat:respawned',
 }
+
+/** Spawn protection, from server/systems/combat.js. Nothing lands while it holds. */
+const SPAWN_PROTECT_MS = 3000
 
 const results = []
 const check = (name, ok, extra = '') =>
@@ -45,12 +53,20 @@ let bMoveSpeed = null
 a.on('connect', () => a.emit(C2S.JOIN, { name: 'Alice', cls: 'warrior' }))
 b.on('connect', () => b.emit(C2S.JOIN, { name: 'Bob', cls: 'hunter' }))
 
+/** Every combat event Bob is on the receiving end of, so hits can be counted. */
+const hitsOnB = []
+const deathsOfB = []
+const respawnsOfB = []
+
 a.on(S2C.WELCOME, (w) => { welcome = w })
 a.on(S2C.SNAPSHOT, (s) => { snapshot = s })
 a.on(S2C.PROFILE_SELF, (p) => { profile = p })
 a.on(S2C.ERROR, (e) => { lastError = e })
 b.on(S2C.CHAT, (m) => { if (m.text === 'hello world') chatSeenByB = true })
 b.on(S2C.PROFILE_SELF, (p) => { bMoveSpeed = p?.stats?.moveSpeed })
+b.on(S2C.COMBAT_HIT, (h) => { if (h.id === b.id) hitsOnB.push(h) })
+b.on(S2C.COMBAT_DEATH, (d) => { if (d.id === b.id) deathsOfB.push(d) })
+b.on(S2C.COMBAT_RESPAWNED, (r) => { if (r.id === b.id) respawnsOfB.push(r) })
 
 await wait(1000)
 
@@ -137,12 +153,95 @@ check('level cap is 20', profile?.profile?.level === 1 && typeof profile?.profil
 check('hunter walks faster than warrior', bMoveSpeed > profile?.stats?.moveSpeed,
   `hunter=${bMoveSpeed} vs warrior=${profile?.stats?.moveSpeed}`)
 
-// --- the six arena systems exist and are all still disabled ---
+// --- the six arena systems exist, each with an honest enabled flag ---
+//
+// They do NOT all have to be disabled any more: a lane flips its own flag the
+// moment its server half works, which is the whole point of the safety switch.
+// What still has to hold is that the flag is declared and is a boolean, so a
+// client system can trust it before initialising.
 const arenaSystems = ['combat', 'effects', 'spells', 'npc', 'inventory', 'loot']
 const declared = arenaSystems.filter((id) => id in (welcome?.systems ?? {}))
 check('six arena systems declared', declared.length === 6, declared.join(','))
-check('arena systems still disabled', arenaSystems.every((id) => welcome?.systems?.[id] === false),
+check('every arena system reports a boolean',
+  arenaSystems.every((id) => typeof welcome?.systems?.[id] === 'boolean'),
   JSON.stringify(welcome?.systems))
+
+// A disabled system must answer NOT_IMPLEMENTED rather than doing nothing
+// quietly — that is what lets half-finished work be merged.
+if (welcome?.systems?.inventory === false) {
+  lastError = null
+  a.emit('inventory:buy', { slot: 'weapon' })
+  await wait(200)
+  check('disabled system answers NOT_IMPLEMENTED', lastError?.code === 'NOT_IMPLEMENTED',
+    JSON.stringify(lastError))
+}
+
+// --- combat (A3): melee, damage, death and respawn ---
+if (welcome?.systems?.combat === true) {
+  const bobOf = () => snapshot.players.find((p) => p.id === b.id)
+  const step = async (dir) => {
+    a.emit(C2S.MOVE, { dir, seq: ++seq })
+    await wait(MOVE_COOLDOWN_MS + 15)
+  }
+
+  // Walk Alice into Bob. Bodies are wider than a tile, so she stops three
+  // tiles short on her own — no arithmetic needed to find "adjacent".
+  for (let i = 0; i < 80; i++) {
+    const me = selfOf()
+    const him = bobOf()
+    if (!him) break
+    if (him.y !== me.y) await step(him.y > me.y ? 0 : 3)
+    else if (Math.abs(him.x - me.x) > 3) await step(him.x > me.x ? 2 : 1)
+    else break
+  }
+
+  const me = selfOf()
+  const him = bobOf()
+  const adjacent = !!him && him.y === me.y && Math.abs(him.x - me.x) <= 4
+  check('walked into melee range', adjacent, `${me.x},${me.y} vs ${him?.x},${him?.y}`)
+
+  a.emit(C2S.FACE, { dir: him.x > me.x ? 2 : 1 })
+
+  // Bob joined with spawn protection. Wait it out, otherwise the first hit is
+  // correctly cancelled and the count below would read as a bug.
+  await wait(SPAWN_PROTECT_MS)
+
+  hitsOnB.length = 0
+  const hpBefore = bobOf().hp
+  a.emit(C2S.COMBAT_ATTACK, {})
+  await wait(300)
+
+  // The single most likely bug in this design is two systems subtracting hp
+  // independently. One swing, one hit — this is the assertion that catches it.
+  check('one melee swing produces exactly one combat:hit', hitsOnB.length === 1,
+    `n=${hitsOnB.length}`)
+  check('melee damage applied', bobOf().hp < hpBefore, `${hpBefore} -> ${bobOf().hp}`)
+  check('hit reports its attacker', hitsOnB[0]?.byId === welcome.selfId, hitsOnB[0]?.byId)
+
+  // Swing until Bob falls: hp, dead and the death event have one writer.
+  for (let i = 0; i < 40 && !bobOf()?.dead; i++) {
+    a.emit(C2S.COMBAT_ATTACK, {})
+    await wait(220)
+  }
+  check('victim dies once', deathsOfB.length === 1 && bobOf()?.dead === true,
+    `deaths=${deathsOfB.length} dead=${bobOf()?.dead}`)
+  check('kill is attributed to the killer', deathsOfB[0]?.killerId === welcome.selfId,
+    deathsOfB[0]?.killerId)
+
+  // Early respawn is refused before the timer and granted after it.
+  lastError = null
+  b.emit(C2S.COMBAT_RESPAWN, {})
+  await wait(200)
+  check('respawn refused while the timer runs', bobOf()?.dead === true, `dead=${bobOf()?.dead}`)
+
+  await wait(3200)
+  b.emit(C2S.COMBAT_RESPAWN, {})
+  await wait(300)
+  check('respawn restores the victim', bobOf()?.dead === false && bobOf()?.hp === bobOf()?.maxHp,
+    `hp=${bobOf()?.hp}/${bobOf()?.maxHp}`)
+  check('respawn is announced with protection', respawnsOfB[0]?.protectedMs > 0,
+    JSON.stringify(respawnsOfB[0]))
+}
 
 b.close()
 await wait(400)
