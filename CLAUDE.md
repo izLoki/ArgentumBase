@@ -1,0 +1,182 @@
+# Working in this repository
+
+Read this before writing code here, whether you are a person or an AI
+assistant.
+
+## What this project is
+
+A base for a **server-authoritative multiplayer tile world**: many players
+moving on a shared grid map in real time. PixiJS 8 + Node/Express +
+Socket.IO + Vite, plain JavaScript with ES modules (`"type": "module"`).
+
+Gameplay features are deliberately absent. The point of the repo is the
+skeleton plus a plugin layer that lets several people build features at the
+same time without stepping on each other.
+
+## The one rule everything else follows
+
+**One feature = one file on each side, plus a registry entry.**
+
+A feature never requires editing the core. That is what keeps parallel work
+conflict-free: two people building different features touch disjoint files.
+
+Core files — do not edit them to add a feature:
+
+```
+server/index.js  server/game/*  server/net/*  shared/constants.js
+client/src/main.js  client/src/net.js  client/src/state.js  client/src/render/*
+```
+
+If you genuinely need something from the core (a new helper on `ctx`, a new
+draw layer), add it — those changes are additive and safe. Rewriting or
+restructuring the core is what breaks everyone else's branch.
+
+## Adding a system
+
+### 1. Server half
+
+Create `server/systems/<name>.js`. Everything is optional except `id`:
+
+```js
+import { C2S, S2C } from '../../shared/protocol.js'
+
+export default {
+  id: 'combat',
+  enabled: true,
+
+  init(ctx) {
+    // Runs once at startup. Create your global state here.
+    ctx.world.ext.combat = { lastAttackAt: new Map() }
+  },
+
+  onPlayerJoin(ctx, player) {
+    // Create your per-player state here.
+    player.ext.combat = { kills: 0 }
+  },
+
+  onPlayerLeave(ctx, player) {},
+
+  onTick(ctx, dtMs) {
+    // Runs every server tick (15/s).
+  },
+
+  collectSnapshot(ctx) {
+    // Optional. The return value is sent to clients as snapshot.ext.combat
+    return { somethingClientsNeed: true }
+  },
+
+  handlers: {
+    // C2S events this system owns.
+    [C2S.ATTACK]: (ctx, player, payload) => {},
+  },
+}
+```
+
+Register it in `server/systems/index.js`: one import line and one array entry.
+That file is the only shared file a new system touches, and the conflict is a
+two-line append that git usually merges by itself.
+
+### 2. Client half
+
+Create `client/src/systems/<same-name>.js`:
+
+```js
+import { S2C } from '@shared/protocol.js'
+
+export default {
+  id: 'combat',
+
+  init(ctx) {
+    // Runs when the world is ready, only if the server system is enabled.
+    ctx.input.onKey('ControlLeft', () => ctx.net.send(C2S.ATTACK, {}))
+  },
+
+  onSnapshot(ctx, snapshot) {},
+  onUpdate(ctx, dtMs) {},
+
+  handlers: {
+    [S2C.COMBAT_EVENT]: (ctx, payload) => {},
+  },
+}
+```
+
+Register it in `client/src/systems/index.js`, same two lines.
+
+A client system only runs when the server reports its counterpart as
+`enabled`, so an unfinished feature cannot break a running world.
+
+### 3. Network events
+
+Add them to `shared/protocol.js` **inside a block named after your system**,
+appended at the end of `C2S` / `S2C`. Never rename or reorder someone else's
+events. The server dispatcher routes everything declared there automatically —
+there is nothing else to wire.
+
+## What `ctx` gives you
+
+Server (`server/game/context.js`):
+
+| Field | Purpose |
+|---|---|
+| `ctx.world` | `players` (Map), `tick`, `ext` |
+| `ctx.world.ext.<id>` | your global state, created in `init` |
+| `player.ext.<id>` | your per-player state, created in `onPlayerJoin` |
+| `ctx.broadcast(ev, data)` | send to everyone |
+| `ctx.sendTo(id, ev, data)` | send to one socket |
+| `ctx.fail(player, code, msg)` | typed error to the caller |
+| `ctx.announce(text)` | system message in chat |
+| `ctx.map`, `ctx.tileAt`, `ctx.isWalkable`, `ctx.SPAWN` | world queries |
+| `ctx.log(...)` | prefixed logging |
+
+Client (built in `client/src/main.js`):
+
+| Field | Purpose |
+|---|---|
+| `ctx.app`, `ctx.layers` | Pixi application and draw layers |
+| `ctx.state`, `ctx.self()` | local mirror of the world |
+| `ctx.net` | `send` / `on` |
+| `ctx.input.onKey(code, fn)` | bind a key without touching `input.js` |
+| `ctx.hud`, `ctx.chat` | HUD updates and message output |
+
+## Rules that keep merges clean
+
+1. **Never write another system's state.** Reading is fine. If you need
+   another system to act, import a function it exports — do not reach into its
+   internals.
+2. **Never add fields to `PlayerView`.** Publish your data through
+   `collectSnapshot()` and read it from `snapshot.ext.<yourId>`.
+3. **Private data does not go in the snapshot.** Snapshots are broadcast to
+   everyone; use `ctx.sendTo(player.id, ...)` for per-player data.
+4. **Bind keys from your own module** with `ctx.input.onKey`, not by editing
+   `input.js`.
+5. **Build UI panels from your own module** by creating the elements in JS,
+   rather than editing `client/index.html`.
+6. **`enabled: false` is the safety switch.** While a system is off, its
+   events answer `NOT_IMPLEMENTED` and nothing else runs. Half-finished work
+   can be merged without breaking the world.
+
+## Architecture invariants
+
+- **The server is authoritative.** The client sends intents; the server
+  decides outcomes. Never compute damage, validate collisions, or apply
+  position changes on the client.
+- **Snapshots are full state**, sent 15 times per second. The client only
+  interpolates for smoothness.
+- **The world lives in memory.** There is no database and none is needed.
+- **No assets.** Everything is drawn with Pixi primitives. Replacing that with
+  a real tileset should only touch `client/src/render/`.
+
+## Style
+
+- All code, comments and documentation in English.
+- Small functions, early returns, no speculative abstractions.
+- Comment *why*, not *what*.
+- No leftover debug `console.log` outside server startup and error paths.
+
+## Things not to do
+
+- Refactoring or restructuring the core "to make it nicer". It invalidates
+  every open branch.
+- Migrating to TypeScript, swapping the bundler, or adding a UI framework.
+- Adding dependencies that a single feature could implement in a few lines.
+- Adding a database or persistence layer unless it was explicitly asked for.

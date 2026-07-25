@@ -1,0 +1,26 @@
+{
+  "name": "argentum-world",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-authoritative multiplayer tile world base (PixiJS + Node + Socket.IO)",
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "node --watch server/index.js",
+    "dev:client": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node server/index.js",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pixi.js": "^8.6.6",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "vite": "^6.0.7"
+  }
+}

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Argentum — multiplayer world</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div id="game"></div>
+
+    <!-- Login. Hidden once the player joins the world. -->
+    <div id="login" class="overlay">
+      <form id="login-form" class="panel">
+        <h1>Argentum</h1>
+        <p class="muted">Multiplayer world — PixiJS + Node + Socket.IO</p>
+        <label>
+          Name
+          <input id="login-name" maxlength="16" placeholder="Your name" required />
+        </label>
+        <label>
+          Class
+          <select id="login-class">
+            <option value="warrior">Warrior</option>
+            <option value="mage">Mage</option>
+            <option value="archer">Archer</option>
+          </select>
+        </label>
+        <button type="submit">Enter the world</button>
+        <p class="hint">WASD or arrow keys to move · Enter to chat</p>
+      </form>
+    </div>
+
+    <!-- HUD, filled in by client/src/ui/hud.js -->
+    <div id="hud" class="hidden">
+      <div id="stats" class="panel compact">
+        <div class="bar"><span id="hp-fill" class="fill hp"></span><b id="hp-text">100/100</b></div>
+        <div class="bar"><span id="mp-fill" class="fill mp"></span><b id="mp-text">50/50</b></div>
+        <div class="row"><span id="hud-name">—</span></div>
+      </div>
+
+      <div id="chat" class="panel">
+        <div id="chat-log"></div>
+        <input id="chat-input" maxlength="120" placeholder="Press Enter to talk…" />
+      </div>
+
+      <div id="debug" class="debug"></div>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
