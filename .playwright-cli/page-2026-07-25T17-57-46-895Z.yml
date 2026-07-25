@@ -1,0 +1,50 @@
+- generic [active] [ref=e1]:
+  - generic:
+    - generic [ref=e14]:
+      - generic [ref=e17]: 170/170
+      - generic [ref=e19]: 0/120 xp
+      - generic [ref=e20]:
+        - generic [ref=e21]: Dana
+        - generic [ref=e22]: Lv 1
+    - generic [ref=e23]:
+      - generic:
+        - generic: Drag the left side of the screen to move · 💬 to talk.
+        - generic: Dana joined the world.
+    - generic [ref=e24]: tile 128,96 · tick 13869 · ping 1ms · 1 online
+    - generic:
+      - button "⚔" [ref=e26] [cursor=pointer]
+      - generic:
+        - button "🎒" [ref=e27] [cursor=pointer]
+        - button "👤" [ref=e28] [cursor=pointer]
+        - button "🛒" [ref=e29] [cursor=pointer]
+    - button "Chat" [ref=e30] [cursor=pointer]: 💬
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - generic [ref=e33]: 🛒 Shop
+        - generic [ref=e34]: 🪙 0
+        - button "✕" [ref=e35] [cursor=pointer]
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e38]: ⚔
+          - generic [ref=e39]:
+            - generic [ref=e40]: Sword
+            - generic [ref=e41]: +4 dmg
+          - button "🪙 60" [disabled] [ref=e42]
+        - generic [ref=e43]:
+          - generic [ref=e44]: 🛡
+          - generic [ref=e45]:
+            - generic [ref=e46]: Armor
+            - generic [ref=e47]: +4 def · +15 hp
+          - button "🪙 70" [disabled] [ref=e48]
+        - generic [ref=e49]:
+          - generic [ref=e50]: 🔮
+          - generic [ref=e51]:
+            - generic [ref=e52]: Staff
+            - generic [ref=e53]: mage only
+          - button "—" [disabled] [ref=e54]
+        - generic [ref=e55]:
+          - generic [ref=e56]: 👢
+          - generic [ref=e57]:
+            - generic [ref=e58]: Boots
+            - generic [ref=e59]: +4% spd · +3% eva · -4% taken
+          - button "🪙 50" [disabled] [ref=e60]

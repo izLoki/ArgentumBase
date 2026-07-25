@@ -10,12 +10,15 @@
  */
 
 import { Application, Container } from 'pixi.js'
+import { loadSprites } from './sprites.js'
 
 export async function createStage(mount) {
   const app = new Application()
   await app.init({
     background: '#0b0d11',
-    resizeTo: window,
+    // The mount box, not the window: the HUD sidebar insets it, and the camera
+    // reads `app.screen` to centre the player in what is actually visible.
+    resizeTo: mount,
     antialias: false,
     roundPixels: true,
     // Phones are high-DPI; without this the primitives look soft. Capped at 2
@@ -24,6 +27,10 @@ export async function createStage(mount) {
     autoDensity: true,
   })
   mount.appendChild(app.canvas)
+
+  // Before the first view is built: a class either has its atlas from the
+  // start, or spends the session as the fallback body. Never both.
+  await loadSprites()
 
   /** World container: the camera moves this one. */
   const camera = new Container()

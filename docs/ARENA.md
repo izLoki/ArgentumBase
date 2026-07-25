@@ -19,7 +19,7 @@ core stays untouched except for the additive hooks listed in
 |---|---|
 | Classes | `warrior`, `mage`, `hunter` |
 | Format | Persistent arena. No rounds, no match state, no reset |
-| Death | You keep level, spells, attributes and gear. You respawn with full HP after a short delay, with brief spawn protection. You drop loot on the ground |
+| Death | You keep level, spells, attributes and gear, and lose **half your coins to your killer**. You respawn with full HP after a short delay, with brief spawn protection. You drop loot on the ground |
 | Level cap | **20**. Attributes at any level are a linear interpolation between the class's level 1 and level 20 blocks — a pure function of class and level, with no manual point spending |
 | Experience | Flat per victim: each class and each monster type is worth a different amount, but who you killed does not steer which attribute grows |
 | Mana | Does not exist. Cooldown is the only limit on spells |
@@ -148,24 +148,57 @@ grants the hunter the full 40% movement bonus.
 
 ### 1.5 Kill rewards
 
-Flat XP and coins per victim, in `shared/rewards.js`:
+Experience is flat per victim. **Coins are not**: a player pays their killer
+out of their own purse, and a monster pays from a table because it has none.
 
 ```js
 export const XP_REWARD = {
   player: { warrior: 130, mage: 140, hunter: 135 },  // scaled by the victim's level
   npc:    { wisp: 28, imp: 30, golem: 45, dragon: 80 },
 }
+
+/** Minted coins. Monsters only — a player has a purse to take from. */
 export const COIN_REWARD = {
-  player: { warrior: 45, mage: 45, hunter: 45 },
   npc:    { wisp: 9, imp: 10, golem: 14, dragon: 26 },
 }
+
+/** What a killer takes from a player victim. A transfer, not a mint. */
+export const PURSE_LOOT_PCT = 50
+
+/** Floor, so beating someone who happens to be broke is not worth nothing. */
+export const MIN_KILL_COINS = 8
+
 export const REPEAT_KILL_WINDOW_MS = 45_000
 ```
 
-Anti-snowball levers (turn on at least two before the arena is playable):
-diminishing XP by killer level (`1 - lvl * 0.02`, floor `0.25`), decay for
-repeatedly killing the same victim inside `REPEAT_KILL_WINDOW_MS`, and a
-bounty multiplier that makes the current leader worth more.
+`rewardFor` returns `{ exp, coins, fromPurse }`: `coins` is what the killer
+receives and `fromPurse` is how much of it is charged to the victim. They are
+equal for a normal kill; they diverge only when the purse is too thin to reach
+`MIN_KILL_COINS`, and the difference is the only minted part. Charging
+`fromPurse` rather than `coins` is what guarantees no player is ever billed
+gold they did not have.
+
+Looting half the purse is a **transfer**: the victim loses exactly what the
+killer gains. Two consequences worth stating, because they replace rules the
+first draft needed:
+
+- **Player coins cannot inflate.** The gear prices in §6 are set against a
+  fixed pool of coins, which monsters top up at a rate the spawner controls.
+- **It is the sharpest anti-snowball lever there is,** and the only one that
+  makes dying cost anything at all. A broke player is worth only the floor, so
+  spawn-camping the same victim collapses to a coin a kill; a rich leader is
+  worth hunting, which is the bounty effect the levers below wanted, arrived
+  at from the other direction.
+
+The transfer deliberately does **not** go through the multipliers. They exist
+to limit minting, and scaling a transfer down would simply delete the
+difference from the economy. Experience, monster coins and the floor do go
+through them — which is precisely what stops the floor from being farmable:
+
+Anti-snowball levers (at least two must be on): diminishing XP by killer level
+(`1 - lvl * 0.02`, floor `0.25`), decay for repeatedly killing the same victim
+inside `REPEAT_KILL_WINDOW_MS`, and a bounty multiplier that makes the current
+leader worth more.
 
 ---
 

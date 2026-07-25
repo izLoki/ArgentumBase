@@ -7,8 +7,22 @@
  */
 
 import { io } from 'socket.io-client'
-import { MAP_WIDTH, MAP_HEIGHT, MOVE_BURST_TILES, MOVE_COOLDOWN_MS } from '../shared/constants.js'
+import {
+  MAP_WIDTH,
+  MAP_HEIGHT,
+  MOVE_BURST_TILES,
+  MOVE_COOLDOWN_MS,
+  PLAYER_RADIUS,
+} from '../shared/constants.js'
 import { decodeTiles } from '../shared/grid.js'
+import { MIN_KILL_COINS, PURSE_LOOT_PCT, purseLoot, rewardFor } from '../shared/rewards.js'
+import {
+  EFFECTS,
+  STACKING,
+  effectDef,
+  resolveParams,
+  sumEffectStats,
+} from '../shared/effects.js'
 
 const URL = process.env.SMOKE_URL ?? 'http://localhost:3000'
 
@@ -29,6 +43,7 @@ const S2C = {
   COMBAT_HIT: 'combat:hit',
   COMBAT_DEATH: 'combat:death',
   COMBAT_RESPAWNED: 'combat:respawned',
+  COMBAT_KILLFEED: 'combat:killfeed',
 }
 
 /** Spawn protection, from server/systems/combat.js. Nothing lands while it holds. */
@@ -64,6 +79,8 @@ a.on(S2C.PROFILE_SELF, (p) => { profile = p })
 a.on(S2C.ERROR, (e) => { lastError = e })
 b.on(S2C.CHAT, (m) => { if (m.text === 'hello world') chatSeenByB = true })
 b.on(S2C.PROFILE_SELF, (p) => { bMoveSpeed = p?.stats?.moveSpeed })
+const killFeed = []
+a.on(S2C.COMBAT_KILLFEED, (k) => { killFeed.push(k) })
 b.on(S2C.COMBAT_HIT, (h) => { if (h.id === b.id) hitsOnB.push(h) })
 b.on(S2C.COMBAT_DEATH, (d) => { if (d.id === b.id) deathsOfB.push(d) })
 b.on(S2C.COMBAT_RESPAWNED, (r) => { if (r.id === b.id) respawnsOfB.push(r) })
@@ -176,6 +193,53 @@ if (welcome?.systems?.inventory === false) {
     JSON.stringify(lastError))
 }
 
+// --- effects (A1): the definition/instance split and the stacking table ---
+//
+// Nothing can apply an effect from a client — that arrives with the spell
+// executor (B2) — so the layer is checked where it can be: the wire contract,
+// and the pure functions the runtime is built on.
+check('effects system is live', welcome?.systems?.effects === true,
+  `enabled=${welcome?.systems?.effects}`)
+check('effects stay off the snapshot while nobody carries one',
+  snapshot.ext?.effects === undefined, JSON.stringify(snapshot.ext?.effects))
+
+// The magnitude comes from the APPLICATION SITE, never from the table: two
+// spells that both burn, one harder than the other, have to be expressible.
+const weakBurn = resolveParams('burning')
+const hardBurn = resolveParams('burning', { tick: { hp: -11 } })
+check('an effect takes its magnitude from the caller',
+  weakBurn.tick.hp === -4 && hardBurn.tick.hp === -11,
+  `${weakBurn.tick.hp} vs ${hardBurn.tick.hp}`)
+check('overriding one application never edits the table',
+  EFFECTS.burning.defaults.tick.hp === -4, JSON.stringify(EFFECTS.burning.defaults))
+
+// A function override is what lets a DoT scale with the caster it was cast by,
+// resolved once at application time.
+const scaledBurn = resolveParams('burning', (s) => ({ tick: { hp: -(4 + s.damage) } }), { damage: 6 })
+check('a caller may scale an effect by the caster stats', scaledBurn.tick.hp === -10,
+  JSON.stringify(scaledBurn))
+
+// Merging is per bucket: overriding the tick must not drop the flags with it.
+const block = resolveParams('iceBlock', { tick: { hp: +9 } })
+check('overrides merge into the defaults rather than replacing them',
+  block.flags?.invulnerable === true && block.tick.hp === 9, JSON.stringify(block))
+
+// The single published modifier sums INSTANCES, and stacks multiply.
+const statSum = sumEffectStats([
+  { id: 'rage', params: { stats: { damage: 8 } }, stacks: 2 },
+  { id: 'swift', params: { stats: { evasion: 6, moveSpeed: 8 } }, stacks: 1 },
+])
+check('stat effects sum by instance and stack',
+  statSum.damage === 16 && statSum.evasion === 6 && statSum.moveSpeed === 8,
+  JSON.stringify(statSum))
+
+check('an unknown effect resolves to nothing rather than throwing',
+  effectDef('nosuch') === null && resolveParams('nosuch') === null)
+
+const badStacking = Object.entries(EFFECTS).filter(([, def]) => !STACKING.includes(def.stacking))
+check('every effect declares a known stacking policy', badStacking.length === 0,
+  badStacking.map(([id]) => id).join(','))
+
 // --- combat (A3): melee, damage, death and respawn ---
 if (welcome?.systems?.combat === true) {
   const bobOf = () => snapshot.players.find((p) => p.id === b.id)
@@ -184,20 +248,36 @@ if (welcome?.systems?.combat === true) {
     await wait(MOVE_COOLDOWN_MS + 15)
   }
 
-  // Walk Alice into Bob. Bodies are wider than a tile, so she stops three
-  // tiles short on her own — no arithmetic needed to find "adjacent".
-  for (let i = 0; i < 80; i++) {
-    const me = selfOf()
-    const him = bobOf()
-    if (!him) break
-    if (him.y !== me.y) await step(him.y > me.y ? 0 : 3)
-    else if (Math.abs(him.x - me.x) > 3) await step(him.x > me.x ? 2 : 1)
-    else break
+  // Closest two bodies can stand, centre to centre. Derived, not written down:
+  // this test walks until the bodies touch, and PLAYER_RADIUS has moved before.
+  const TOUCHING = 2 * PLAYER_RADIUS + 1
+
+  /** Column to line up in. Wide enough that no y step can clip Bob's body. */
+  const LANE = TOUCHING + 2
+
+  /** Steps `dir` until `done()`, or gives up. Returns whether it arrived. */
+  const walkUntil = async (done, dir, limit = 80) => {
+    for (let i = 0; i < limit; i++) {
+      const me = selfOf()
+      const him = bobOf()
+      if (!me || !him) return false
+      if (done(me, him)) return true
+      await step(dir(me, him))
+    }
+    return false
   }
+
+  // Back off, line up, then close in. Walking at Bob diagonally wedges her
+  // against him instead: a body is 5 tiles wide, so a corner touch blocks the
+  // approach on BOTH axes and she never reaches his row.
+  const dx = (me, him) => Math.abs(him.x - me.x)
+  await walkUntil((me, him) => dx(me, him) >= LANE, (me, him) => (him.x > me.x ? 1 : 2), 40)
+  await walkUntil((me, him) => me.y === him.y, (me, him) => (him.y > me.y ? 0 : 3))
+  await walkUntil((me, him) => dx(me, him) <= TOUCHING, (me, him) => (him.x > me.x ? 2 : 1), 40)
 
   const me = selfOf()
   const him = bobOf()
-  const adjacent = !!him && him.y === me.y && Math.abs(him.x - me.x) <= 4
+  const adjacent = !!him && him.y === me.y && Math.abs(him.x - me.x) <= TOUCHING
   check('walked into melee range', adjacent, `${me.x},${me.y} vs ${him?.x},${him?.y}`)
 
   a.emit(C2S.FACE, { dir: him.x > me.x ? 2 : 1 })
@@ -207,6 +287,7 @@ if (welcome?.systems?.combat === true) {
   await wait(SPAWN_PROTECT_MS)
 
   hitsOnB.length = 0
+  const levelBefore = profile?.profile?.level
   const hpBefore = bobOf().hp
   a.emit(C2S.COMBAT_ATTACK, {})
   await wait(300)
@@ -228,6 +309,26 @@ if (welcome?.systems?.combat === true) {
   check('kill is attributed to the killer', deathsOfB[0]?.killerId === welcome.selfId,
     deathsOfB[0]?.killerId)
 
+  // --- combat (A4): rewards, kill feed and the scoreboard ---
+  await wait(200)
+  check('kill feed announces the kill once', killFeed.length === 1,
+    JSON.stringify(killFeed))
+  check('killer earns experience', profile?.profile?.level > levelBefore,
+    `level ${levelBefore} -> ${profile?.profile?.level}`)
+
+  // Bob never earned a coin, so there was nothing to loot and the killer falls
+  // back to the minted floor — the one part of a kill that is created rather
+  // than taken.
+  check('a broke victim still pays the floor', killFeed[0]?.reward?.coins === MIN_KILL_COINS,
+    JSON.stringify(killFeed[0]?.reward))
+  check('the killer is credited exactly that', profile?.profile?.gold === MIN_KILL_COINS,
+    `gold=${profile?.profile?.gold}`)
+
+  const score = snapshot.ext?.combat?.score
+  check('scoreboard rides the snapshot',
+    score?.[welcome.selfId]?.[0] === 1 && score?.[b.id]?.[1] === 1,
+    JSON.stringify(score))
+
   // Early respawn is refused before the timer and granted after it.
   lastError = null
   b.emit(C2S.COMBAT_RESPAWN, {})
@@ -242,6 +343,46 @@ if (welcome?.systems?.combat === true) {
   check('respawn is announced with protection', respawnsOfB[0]?.protectedMs > 0,
     JSON.stringify(respawnsOfB[0]))
 }
+
+// --- the reward split itself, as pure functions ---
+//
+// A live purse cannot be arranged from a client — there is no way to hand Bob
+// gold without a cheat hook — so the arithmetic the server runs is checked
+// directly. The integration path above proves it is wired in.
+check('a killer loots half the purse', purseLoot(300) === 150, `${purseLoot(300)} of 300`)
+check('looting rounds down and never overdraws',
+  purseLoot(45) === 22 && purseLoot(1) === 0 && purseLoot(0) === 0,
+  `${purseLoot(45)}, ${purseLoot(1)}, ${purseLoot(0)}`)
+
+const rich = { victimKind: 'player', victimType: 'mage', victimLevel: 6, victimGold: 480, killerLevel: 3 }
+const pvp = rewardFor(rich)
+check('a full purse is looted, not minted', pvp.coins === 240 && pvp.fromPurse === 240,
+  JSON.stringify(pvp))
+check('player kills still pay experience', pvp.exp > 0, `exp=${pvp.exp}`)
+
+// Repeat-killing the same victim decays experience but not the purse cut: the
+// purse is its own limiter, and shrinking a transfer would delete coins.
+const repeat = rewardFor({ ...rich, repeats: 2 })
+check('repeat kills decay experience', repeat.exp < pvp.exp, `${pvp.exp} -> ${repeat.exp}`)
+check('repeat kills do not decay the looted purse', repeat.coins === pvp.coins,
+  `${pvp.coins} vs ${repeat.coins}`)
+
+// The floor is minted, so it is the one part of a kill the levers CAN scale —
+// which is what stops a broke victim from being farmed for it.
+const broke = rewardFor({ victimKind: 'player', victimType: 'mage', victimLevel: 1, victimGold: 3, killerLevel: 1 })
+check('a thin purse falls back to the floor',
+  broke.coins === MIN_KILL_COINS && broke.fromPurse === 1, JSON.stringify(broke))
+check('the victim is only ever charged what they had', broke.fromPurse <= 3,
+  `fromPurse=${broke.fromPurse} of 3`)
+
+const farmed = rewardFor({ victimKind: 'player', victimType: 'mage', victimLevel: 1, victimGold: 0, killerLevel: 1, repeats: 3 })
+check('farming a broke victim decays the floor', farmed.coins < MIN_KILL_COINS,
+  `${MIN_KILL_COINS} -> ${farmed.coins}`)
+
+const pve = rewardFor({ victimKind: 'npc', victimType: 'golem', killerLevel: 1 })
+check('monster coins are still minted from the table',
+  pve.fromPurse === 0 && pve.coins > 0, JSON.stringify(pve))
+check('the loot share is a documented percentage', PURSE_LOOT_PCT === 50, `${PURSE_LOOT_PCT}%`)
 
 b.close()
 await wait(400)

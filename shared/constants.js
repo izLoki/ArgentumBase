@@ -93,12 +93,17 @@ export const MOVE_COOLDOWN_MS = 35
 export const MOVE_BURST_TILES = 4
 
 /**
- * Half-size of a player's body, in tiles: `1` means a 3x3 footprint (24 px),
- * about the size a player sprite has always had on screen. Bodies collide when
- * their footprints overlap, and a player only fits where the whole footprint
- * is walkable.
+ * Half-size of a player's body, in tiles: `2` means a 5x5 footprint (40 px).
+ * Bodies collide when their footprints overlap, and a player only fits where
+ * the whole footprint is walkable.
+ *
+ * This is the GROUND a character occupies, not how tall it looks: the sprite
+ * hangs well above it (see `client/src/render/entities.js`). Raising it again
+ * is not free — a body that no longer fits between two terrain blocks silently
+ * cuts parts of the map off. At 2 the town gates still pass and only a handful
+ * of pockets between adjacent trees become unreachable.
  */
-export const PLAYER_RADIUS = 1
+export const PLAYER_RADIUS = 2
 
 /**
  * Only used for the instant between `createPlayer` and the profile's first

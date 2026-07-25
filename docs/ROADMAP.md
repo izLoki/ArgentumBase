@@ -225,9 +225,13 @@ initialises, so an unfinished lane cannot break anyone else's world.
 
 These do not block M0, but they should be settled before Lane A ships A4.
 
-1. **Snowball control.** With death costing nothing, whoever gets ahead stays
-   ahead. Pick at least two of: diminishing XP by killer level, repeat-kill
-   decay, and a bounty multiplier on the leader.
+1. ~~**Snowball control.**~~ **Settled in A4.** Death now costs half the
+   victim's purse, paid straight to the killer (`PURSE_LOOT_PCT`, `ARENA.md`
+   §1.5). That is a lever in its own right — a broke player is worth nothing
+   and a rich leader is worth hunting — on top of the two that were already
+   on: diminishing XP by killer level and repeat-kill decay. The bounty
+   multiplier stays off; the purse achieves the same thing without a
+   leaderboard.
 2. **The map.** This plan does not rewrite `server/world/map.js` — the existing
    walled town is the arena. A purpose-built symmetric arena is a separate
    milestone adding `server/world/arena.js`.
