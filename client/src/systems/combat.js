@@ -82,6 +82,15 @@ export default {
     buildFeed()
     buildOverlay(ctx)
 
+    shown = { kills: -1, deaths: -1 } // a reconnect starts a new player
+
+    // The attack is `SPELLS.attack`, slot 0 of the rail, and `spells` owns the
+    // whole rail once it is live — binding it here too would put two ⚔ buttons
+    // on a phone and run two independent cooldowns. This binding is the
+    // fallback for a world running combat without spells; while it is off, the
+    // death overlay's own button is what respawns.
+    if (ctx.state.systems.spells) return
+
     ctx.action({
       id: 'attack',
       label: '⚔',
@@ -91,7 +100,6 @@ export default {
         else ctx.net.send(C2S.COMBAT_ATTACK, {})
       },
     })
-    shown = { kills: -1, deaths: -1 } // a reconnect starts a new player
   },
 
   /**

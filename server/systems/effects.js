@@ -180,9 +180,13 @@ export default {
 /**
  * Applies (or refreshes) a timed effect.
  *
- * The magnitude comes from the CALLER, never from the table: `opts.params` is
- * merged over the definition's `defaults` and resolved once, here. Pass a
- * function to scale it with the caster:
+ * The magnitude comes from the CALLER, never from the table — that is the whole
+ * point of the definition/instance split (ARENA.md §3.3): the TABLE declares
+ * what `burning` is, the CALLER says how hard this particular burn hurts.
+ * Without it every burn in the game would be identical and two spells could not
+ * burn at different rates. `opts.params` is merged over the definition's
+ * `defaults` and resolved once, here. Pass a function to scale it with the
+ * caster:
  *
  *   applyEffect(ctx, target, 'burning', 5000, {
  *     sourceId: caster.id,
@@ -200,8 +204,10 @@ export default {
  *                                    instance key for `stack` / `perSource`
  * @param {Object} [opts.source]      the caster's handle, so a lethal tick is
  *                                    credited to whoever cast it
- * @param {Object|Function} [opts.params]  magnitude overrides
- * @param {Object} [opts.casterStats] what a function override is handed
+ * @param {Object|Function} [opts.params]  magnitude overrides, merged over the
+ *   effect's `defaults`. A function receives the caster's stats, which is what
+ *   lets a DoT scale with intelligence at the moment it lands.
+ * @param {Object} [opts.casterStats] passed to `opts.params` when it is a function
  * @param {number} [opts.stacks]
  * @returns {boolean} false when the id is unknown, the target cannot hold
  *   effects, or a `strongest` application lost to the instance already there

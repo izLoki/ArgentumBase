@@ -155,13 +155,25 @@ produce exactly one `combat:hit`.
 Owns `shared/spells.js`, `server/systems/spells.js`, `server/systems/npc.js`
 and their client halves.
 
-| Task | What | Depends on |
-|---|---|---|
-| **B1** | `shared/spells.js` in full: the melee slot 0 plus all fifteen definitions from `ARENA.md` §4.6, each with its `base` / `attr` / `scaling` triple (§4.2), plus `effectiveCooldown` and `spellDamage` | M0 |
-| **B2** | `spells` server: the executor, the `ACTIONS` registry, all seven targeting shapes, cooldowns from `cdr`, level-gated unlocks, the private spellbook | B1, A3 signature |
-| **B3** | `spells` client: five rail buttons, cooldown sweeps, auto-target plus long-press aiming, projectile / ray / impact rendering in `layers.fx` | B2 |
-| **B4** | `npc` server: the mob table, spawner, AI, `registerBlocker` and `registerTargetProvider`, casting through B2's executor, drops through `loot.spawnDrop` | B2, A3 signature |
-| **B5** | `npc` client: mob rendering with health bars in `layers.entities`, and `mobViewPosition` for other systems to anchor FX | B4 |
+| Task | What | Depends on | Status |
+|---|---|---|---|
+| **B1** | `shared/spells.js` in full: the melee slot 0 plus all fifteen definitions from `ARENA.md` §4.6, each with its `base` / `attr` / `scaling` triple (§4.2), plus `effectiveCooldown` and `spellDamage` | M0 | **done** |
+| **B2** | `spells` server: the executor, the `ACTIONS` registry, all seven targeting shapes, cooldowns from `cdr`, level-gated unlocks, the private spellbook | B1, A3 signature | **done** |
+| **B3** | `spells` client: six rail buttons, cooldown sweeps, auto-target plus long-press aiming, projectile / ray / impact rendering in `layers.fx` | B2 | **done** |
+| **B4** | `npc` server: the mob table, spawner, AI, `registerBlocker` and `registerTargetProvider`, casting through B2's executor, drops through `loot.spawnDrop` | B2, A3 signature | |
+| **B5** | `npc` client: mob rendering with health bars in `layers.entities`, and `mobViewPosition` for other systems to anchor FX | B4 | |
+
+Two contract notes came out of B2, both worth knowing before A1 and B4:
+
+- **`applyEffect` now takes `opts.params`.** The definition/instance split (§3.3)
+  is unusable without it — the spell actions carry `params: { tick: { hp: -7 } }`
+  and something has to receive them. The JSDoc in `server/systems/effects.js`
+  records the shape; A1 has to honour it.
+- **Area questions are asked with body radius, not centre distance.**
+  `combat.targetsInRadius` compares centres, which would make a `radius: 0`
+  trap fire only on a player standing dead centre on an 8 px tile. `spells`
+  wraps it in `bodiesInRadius`, inflating by `PLAYER_RADIUS`. Anything else
+  asking "did someone touch this" wants the same wrapper.
 
 B4 depends on B2 because mobs cast through the same executor. Inside the lane
 that is sequential; across lanes it blocks nobody.
